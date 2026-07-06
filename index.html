@@ -70,6 +70,11 @@
       <button id="add-manual-entry-btn" class="btn btn-secondary btn-compact" type="button">Eintrag hinzufügen</button>
       <button id="add-compensation-btn" class="btn btn-secondary btn-compact" type="button">Ausgleich hinzufügen</button>
     </div>
+    <div class="history-actions">
+      <button id="export-csv-btn" class="btn btn-secondary btn-compact" type="button">CSV exportieren</button>
+      <button id="import-csv-btn" class="btn btn-secondary btn-compact" type="button">CSV importieren</button>
+      <input type="file" id="import-csv-input" accept=".csv,text/csv" hidden />
+    </div>
     <div id="history-list" class="history-list"></div>
     <p id="history-empty" class="history-empty" hidden>Noch keine Einträge vorhanden.</p>
   </section>
@@ -216,6 +221,19 @@
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
         <button type="submit" class="btn btn-danger-solid" value="confirm">Löschen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: review + confirm a CSV import before it's applied -->
+  <dialog id="import-dialog" class="app-dialog">
+    <form id="import-form" method="dialog">
+      <h3>CSV importieren</h3>
+      <p id="import-summary" class="confirm-message"></p>
+      <div id="import-errors" class="import-errors" hidden></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm" id="import-confirm-btn">Importieren</button>
       </div>
     </form>
   </dialog>

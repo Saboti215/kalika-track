@@ -327,6 +327,228 @@ function buildHistoryGroups() {
 }
 
 /* --------------------------------------------------------------------------
+   CSV import / export
+   Columns: Typ;Datum;Start;Ende;Pause;Ziel;Ausgleich;Notiz
+   Export and import share this exact format, so exporting once (even with
+   no data) gives a ready-made template for reshaping data from other tools.
+   -------------------------------------------------------------------------- */
+
+const CSV_COLUMNS = ['Typ', 'Datum', 'Start', 'Ende', 'Pause', 'Ziel', 'Ausgleich', 'Notiz'];
+
+function csvEscapeField(value) {
+  const str = String(value ?? '');
+  if (/[;,"\n\r]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+function buildExportCsv() {
+  const rows = [CSV_COLUMNS];
+
+  const completedSessions = state.sessions
+    .filter((session) => session.end !== null)
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+
+  completedSessions.forEach((session) => {
+    const dateKey = toDateKey(new Date(session.start));
+    const meta = getDayMeta(dateKey);
+    rows.push([
+      'Arbeitszeit',
+      dateKey,
+      toTimeInputValue(session.start),
+      toTimeInputValue(session.end),
+      formatHM(session.breakMinutes || 0),
+      formatHM(meta.targetMinutes),
+      '',
+      session.note || '',
+    ]);
+  });
+
+  const sortedCompensations = [...state.compensations].sort((a, b) => (a.date < b.date ? -1 : 1));
+  sortedCompensations.forEach((comp) => {
+    rows.push(['Ausgleich', comp.date, '', '', '', '', formatHM(comp.minutes), comp.note || '']);
+  });
+
+  return rows.map((row) => row.map(csvEscapeField).join(';')).join('\r\n');
+}
+
+function downloadTextFile(filename, content, mimeType) {
+  // Prefix a UTF-8 BOM so Excel correctly detects encoding (umlauts in notes).
+  const blob = new Blob(['﻿' + content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function exportEntriesAsCsv() {
+  downloadTextFile(`kalika-track-export-${todayKey()}.csv`, buildExportCsv(), 'text/csv;charset=utf-8;');
+}
+
+function detectCsvDelimiter(text) {
+  const firstLine = text.split(/\r\n|\n|\r/, 1)[0] || '';
+  const semicolons = (firstLine.match(/;/g) || []).length;
+  const commas = (firstLine.match(/,/g) || []).length;
+  return semicolons >= commas ? ';' : ',';
+}
+
+/** Minimal RFC4180-style CSV parser: handles quoted fields, escaped quotes, and embedded delimiters. */
+function parseCsvText(text, delimiter) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = true;
+    } else if (char === delimiter) {
+      row.push(field);
+      field = '';
+    } else if (char === '\r') {
+      // skip; \n (or end of input) closes the row
+    } else if (char === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += char;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows.filter((r) => r.some((cell) => cell.trim() !== ''));
+}
+
+/** Parses one data row into a session or compensation, given the header->column-index map. */
+function parseImportRow(rawRow, headerIndex, rowNumber) {
+  const get = (name) => {
+    const idx = headerIndex[name];
+    return idx == null || idx < 0 || idx >= rawRow.length ? '' : rawRow[idx].trim();
+  };
+
+  const typ = get('typ').toLowerCase();
+  const dateKey = get('datum');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    return { error: `Zeile ${rowNumber}: ungültiges oder fehlendes Datum ("${get('datum')}").` };
+  }
+
+  if (typ === 'ausgleich') {
+    const minutes = parseHM(get('ausgleich'));
+    if (minutes == null) {
+      return { error: `Zeile ${rowNumber}: ungültiger Wert in Spalte "Ausgleich" ("${get('ausgleich')}").` };
+    }
+    return { compensation: { date: dateKey, minutes, note: get('notiz') } };
+  }
+
+  if (typ === 'arbeitszeit') {
+    const startValue = get('start');
+    const endValue = get('ende');
+    if (!/^\d{1,2}:\d{2}$/.test(startValue) || !/^\d{1,2}:\d{2}$/.test(endValue)) {
+      return { error: `Zeile ${rowNumber}: ungültige Start- oder Endzeit.` };
+    }
+    const startDate = combineDateAndTime(dateKey, startValue);
+    const endDate = combineDateAndTime(dateKey, endValue);
+    if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
+    const breakMinutes = parseHM(get('pause')) ?? 0;
+    const targetRaw = get('ziel');
+    const targetMinutes = targetRaw ? parseHM(targetRaw) : null;
+    return {
+      session: { startIso: startDate.toISOString(), endIso: endDate.toISOString(), breakMinutes, note: get('notiz') },
+      dateKey,
+      targetMinutes,
+    };
+  }
+
+  return { error: `Zeile ${rowNumber}: unbekannter Typ ("${get('typ')}"), erwartet "Arbeitszeit" oder "Ausgleich".` };
+}
+
+/** Parses a full CSV file into importable entries plus any per-row error messages. */
+function parseImportCsv(text) {
+  const delimiter = detectCsvDelimiter(text);
+  const rows = parseCsvText(text, delimiter);
+  if (rows.length === 0) {
+    return { sessions: [], compensations: [], dayTargets: {}, errors: ['Die Datei ist leer.'] };
+  }
+
+  const header = rows[0].map((cell) => cell.trim().toLowerCase());
+  const headerIndex = {};
+  ['typ', 'datum', 'start', 'ende', 'pause', 'ziel', 'ausgleich', 'notiz'].forEach((name) => {
+    headerIndex[name] = header.indexOf(name);
+  });
+  if (headerIndex.typ < 0 || headerIndex.datum < 0) {
+    return {
+      sessions: [],
+      compensations: [],
+      dayTargets: {},
+      errors: ['Spalten "Typ" und "Datum" wurden nicht gefunden. Bitte das Format der CSV-Vorlage (Export) verwenden.'],
+    };
+  }
+
+  const sessions = [];
+  const compensations = [];
+  const dayTargets = {};
+  const errors = [];
+
+  rows.slice(1).forEach((row, index) => {
+    const parsed = parseImportRow(row, headerIndex, index + 2);
+    if (parsed.error) {
+      errors.push(parsed.error);
+      return;
+    }
+    if (parsed.compensation) compensations.push(parsed.compensation);
+    if (parsed.session) {
+      sessions.push(parsed.session);
+      if (parsed.targetMinutes != null) dayTargets[parsed.dateKey] = parsed.targetMinutes;
+    }
+  });
+
+  return { sessions, compensations, dayTargets, errors };
+}
+
+/** Commits parsed import results into state with a single save. */
+function applyImportedEntries(sessions, compensations, dayTargets) {
+  sessions.forEach((session) => {
+    state.sessions.push({
+      id: crypto.randomUUID(),
+      start: session.startIso,
+      end: session.endIso,
+      breakMinutes: session.breakMinutes,
+      note: session.note || '',
+    });
+  });
+  compensations.forEach((comp) => {
+    state.compensations.push({ id: crypto.randomUUID(), date: comp.date, minutes: comp.minutes, note: comp.note || '' });
+  });
+  Object.entries(dayTargets).forEach(([dateKey, targetMinutes]) => {
+    state.days[dateKey] = { targetMinutes };
+  });
+  saveState();
+}
+
+/* --------------------------------------------------------------------------
    Rendering
    -------------------------------------------------------------------------- */
 
@@ -341,6 +563,8 @@ const ICON_DELETE =
 const toggleTrackingBtn = document.getElementById('toggle-tracking-btn');
 const addCompensationBtn = document.getElementById('add-compensation-btn');
 const addManualEntryBtn = document.getElementById('add-manual-entry-btn');
+const exportCsvBtn = document.getElementById('export-csv-btn');
+const importCsvBtn = document.getElementById('import-csv-btn');
 const globalBalanceEl = document.getElementById('global-balance');
 const runningIndicatorEl = document.getElementById('running-indicator');
 const historyListEl = document.getElementById('history-list');
@@ -564,11 +788,17 @@ const sessionEditDialog = document.getElementById('session-edit-dialog');
 const manualEntryDialog = document.getElementById('manual-entry-dialog');
 const confirmDialog = document.getElementById('confirm-dialog');
 const confirmMessageEl = document.getElementById('confirm-message');
+const importDialog = document.getElementById('import-dialog');
+const importSummaryEl = document.getElementById('import-summary');
+const importErrorsEl = document.getElementById('import-errors');
+const importConfirmBtn = document.getElementById('import-confirm-btn');
+const importCsvInput = document.getElementById('import-csv-input');
 
 let pendingStopSessionId = null;
 let pendingDayDateKey = null;
 let pendingSessionEditId = null;
 let pendingConfirmResolve = null;
+let pendingImportResult = null;
 
 /**
  * Custom replacement for the native confirm() dialog, styled and animated
@@ -635,6 +865,33 @@ function openManualEntryDialog() {
   manualEntryDialog.showModal();
 }
 
+function openImportDialog(result) {
+  pendingImportResult = result;
+  const total = result.sessions.length + result.compensations.length;
+  const parts = [];
+  if (result.sessions.length) parts.push(`${result.sessions.length} Arbeitszeit${result.sessions.length === 1 ? '' : 'en'}`);
+  if (result.compensations.length) parts.push(`${result.compensations.length} Ausgleich${result.compensations.length === 1 ? '' : 'e'}`);
+
+  importSummaryEl.textContent =
+    total > 0
+      ? `${total} ${total === 1 ? 'Eintrag' : 'Einträge'} gefunden: ${parts.join(', ')}.`
+      : 'Keine gültigen Einträge gefunden.';
+
+  if (result.errors.length > 0) {
+    importErrorsEl.hidden = false;
+    importErrorsEl.innerHTML = `<p>${result.errors.length} Zeile${result.errors.length === 1 ? '' : 'n'} übersprungen:</p><ul>${result.errors
+      .map((error) => `<li>${escapeHtml(error)}</li>`)
+      .join('')}</ul>`;
+  } else {
+    importErrorsEl.hidden = true;
+    importErrorsEl.innerHTML = '';
+  }
+
+  importConfirmBtn.disabled = total === 0;
+  importDialog.returnValue = '';
+  importDialog.showModal();
+}
+
 /* --------------------------------------------------------------------------
    Event wiring
    -------------------------------------------------------------------------- */
@@ -653,6 +910,16 @@ function attachEventListeners() {
   addCompensationBtn.addEventListener('click', openCompensationDialog);
   addManualEntryBtn.addEventListener('click', openManualEntryDialog);
   todayTargetEl.addEventListener('click', () => openDaySettingsDialog(todayKey()));
+
+  exportCsvBtn.addEventListener('click', exportEntriesAsCsv);
+  importCsvBtn.addEventListener('click', () => importCsvInput.click());
+  importCsvInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    event.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    const text = await file.text();
+    openImportDialog(parseImportCsv(text));
+  });
 
   tabButtons.forEach((btn) => {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
@@ -755,6 +1022,14 @@ function attachEventListeners() {
     const resolve = pendingConfirmResolve;
     pendingConfirmResolve = null;
     resolve?.(confirmDialog.returnValue === 'confirm');
+  });
+
+  importDialog.addEventListener('close', () => {
+    const result = pendingImportResult;
+    pendingImportResult = null;
+    if (importDialog.returnValue !== 'confirm' || !result) return;
+    applyImportedEntries(result.sessions, result.compensations, result.dayTargets);
+    renderAll();
   });
 
   // Event delegation for dynamically rendered entry rows, shared by both lists.

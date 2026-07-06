@@ -104,7 +104,15 @@ html, body {
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  min-height: 100%;
+  /* `100%` alone has no defined basis without an explicit height on a parent.
+     `100vh` covers browsers without dvh support; `100dvh` (dynamic viewport
+     height) is the actual fix — iOS resizes the visible viewport differently
+     between a regular Safari tab (browser chrome reserves space) and an
+     installed standalone PWA (no chrome, full screen), and only dvh tracks
+     that correctly. Without it, standalone mode leaves a gap the size of the
+     now-absent browser toolbar below any bottom-fixed element. */
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 body {

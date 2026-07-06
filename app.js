@@ -1,0 +1,790 @@
+'use strict';
+
+/* ==========================================================================
+   kalika-track - application logic
+   Fully client-side time tracking with flextime/overtime calculation.
+   All persistence happens via localStorage, no backend involved.
+   ========================================================================== */
+
+const STORAGE_KEY = 'kalika-track.v1';
+
+/* --------------------------------------------------------------------------
+   Storage
+   -------------------------------------------------------------------------- */
+
+function createDefaultState() {
+  return {
+    version: 2,
+    sessions: [], // { id, start: ISO string, end: ISO string|null, breakMinutes, note }
+    days: {}, // dateKey -> { targetMinutes }
+    compensations: [], // { id, date: dateKey, minutes, note }
+    settings: { defaultTargetMinutes: 480, defaultBreakMinutes: 30 },
+  };
+}
+
+/**
+ * Migrates v1 data (break stored per day) to v2 (break stored per session).
+ * Each day's stored break is assigned to that day's earliest completed
+ * session; every other session on that day gets no break (0), since there
+ * is no way to know how the day's single break was actually distributed.
+ */
+function migrateDayBreaksToSessions(sessions, days) {
+  const sessionsByDate = new Map();
+  sessions.forEach((session) => {
+    if (session.end === null) return;
+    const dateKey = toDateKey(new Date(session.start));
+    if (!sessionsByDate.has(dateKey)) sessionsByDate.set(dateKey, []);
+    sessionsByDate.get(dateKey).push(session);
+  });
+  sessionsByDate.forEach((daySessions, dateKey) => {
+    const legacyBreak = days[dateKey]?.breakMinutes;
+    if (legacyBreak == null) return;
+    daySessions.sort((a, b) => new Date(a.start) - new Date(b.start));
+    daySessions[0].breakMinutes = legacyBreak;
+  });
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return createDefaultState();
+    const parsed = JSON.parse(raw);
+
+    const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map((s) => ({ ...s })) : [];
+    const legacyDays = parsed.days && typeof parsed.days === 'object' ? parsed.days : {};
+    const compensations = Array.isArray(parsed.compensations) ? parsed.compensations : [];
+    const settings = {
+      defaultTargetMinutes: parsed.settings?.defaultTargetMinutes ?? 480,
+      defaultBreakMinutes: parsed.settings?.defaultBreakMinutes ?? 30,
+    };
+
+    if ((parsed.version ?? 1) < 2) {
+      migrateDayBreaksToSessions(sessions, legacyDays);
+    }
+
+    // Every session must have a breakMinutes and note field from here on.
+    sessions.forEach((session) => {
+      if (typeof session.breakMinutes !== 'number') session.breakMinutes = 0;
+      if (typeof session.note !== 'string') session.note = '';
+    });
+
+    // Day meta is target-only as of v2 (break now lives on the session).
+    const days = {};
+    Object.keys(legacyDays).forEach((dateKey) => {
+      days[dateKey] = { targetMinutes: legacyDays[dateKey]?.targetMinutes ?? settings.defaultTargetMinutes };
+    });
+
+    return { version: 2, sessions, days, compensations, settings };
+  } catch (error) {
+    console.error('kalika-track: failed to load state, starting fresh.', error);
+    return createDefaultState();
+  }
+}
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+let state = loadState();
+saveState(); // persist the migrated shape immediately so it only ever runs once
+
+/* --------------------------------------------------------------------------
+   Formatting helpers (time, dates)
+   -------------------------------------------------------------------------- */
+
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+/** Parses "8:00", "8", or "7,5" into a whole number of minutes. */
+function parseHM(input) {
+  if (input == null) return null;
+  const trimmed = String(input).trim();
+  if (!trimmed) return null;
+  if (trimmed.includes(':')) {
+    const [hoursPart, minutesPart] = trimmed.split(':');
+    const hours = parseInt(hoursPart, 10);
+    const minutes = parseInt(minutesPart, 10);
+    if (Number.isNaN(hours)) return null;
+    return hours * 60 + (Number.isNaN(minutes) ? 0 : minutes);
+  }
+  const hoursFloat = parseFloat(trimmed.replace(',', '.'));
+  if (Number.isNaN(hoursFloat)) return null;
+  return Math.round(hoursFloat * 60);
+}
+
+/** Formats minutes as "H:MM" (no sign), e.g. 480 -> "8:00". */
+function formatHM(totalMinutes) {
+  const minutes = Math.round(totalMinutes);
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return `${hours}:${pad2(remainder)}`;
+}
+
+/** Formats a signed balance in minutes as "+HH:MMh" / "-HH:MMh". */
+function formatBalance(totalMinutes) {
+  const sign = totalMinutes < 0 ? '-' : '+';
+  const absMinutes = Math.round(Math.abs(totalMinutes));
+  const hours = Math.floor(absMinutes / 60);
+  const remainder = absMinutes % 60;
+  return `${sign}${pad2(hours)}:${pad2(remainder)}h`;
+}
+
+/** Formats an unsigned duration in minutes as "H:MMh", e.g. "3:45h". */
+function formatDurationHours(totalMinutes) {
+  const absMinutes = Math.round(Math.abs(totalMinutes));
+  const hours = Math.floor(absMinutes / 60);
+  const remainder = absMinutes % 60;
+  return `${hours}:${pad2(remainder)}h`;
+}
+
+function formatTime(isoString) {
+  return new Date(isoString).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Converts a Date to a local "YYYY-MM-DD" key (never UTC, to avoid day-shift bugs). */
+function toDateKey(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function todayKey() {
+  return toDateKey(new Date());
+}
+
+function formatDateHeading(dateKey) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return new Intl.DateTimeFormat('de-DE', {
+    weekday: 'short',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
+}
+
+/** Converts an ISO timestamp to a local "HH:MM" value for <input type="time">. */
+function toTimeInputValue(isoString) {
+  const date = new Date(isoString);
+  return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+/** Combines a "YYYY-MM-DD" date key with a "HH:MM" time value into a local Date. */
+function combineDateAndTime(dateKey, timeValue) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const [hours, minutes] = timeValue.split(':').map(Number);
+  return new Date(year, month - 1, day, hours, minutes, 0, 0);
+}
+
+function escapeHtml(value) {
+  const container = document.createElement('div');
+  container.textContent = value;
+  return container.innerHTML;
+}
+
+/* --------------------------------------------------------------------------
+   Core state mutations
+   -------------------------------------------------------------------------- */
+
+function getRunningSession() {
+  return state.sessions.find((session) => session.end === null) || null;
+}
+
+function startSession() {
+  state.sessions.push({ id: crypto.randomUUID(), start: new Date().toISOString(), end: null, breakMinutes: 0, note: '' });
+  saveState();
+}
+
+function stopSession(sessionId, breakMinutes, targetMinutes, note) {
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  session.end = new Date().toISOString();
+  session.breakMinutes = breakMinutes;
+  session.note = note || '';
+  const dateKey = toDateKey(new Date(session.start));
+  state.days[dateKey] = { targetMinutes };
+  saveState();
+}
+
+function updateSession(sessionId, startIso, endIso, breakMinutes, note) {
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  session.start = startIso;
+  session.end = endIso;
+  session.breakMinutes = breakMinutes;
+  session.note = note || '';
+  saveState();
+}
+
+/** Adds a completed session entered retroactively (Historie -> "Eintrag hinzufügen"). */
+function addManualSession(startIso, endIso, breakMinutes, note) {
+  state.sessions.push({ id: crypto.randomUUID(), start: startIso, end: endIso, breakMinutes, note: note || '' });
+  saveState();
+}
+
+function deleteSession(sessionId) {
+  state.sessions = state.sessions.filter((item) => item.id !== sessionId);
+  saveState();
+}
+
+function getDayMeta(dateKey) {
+  const override = state.days[dateKey];
+  return { targetMinutes: override?.targetMinutes ?? state.settings.defaultTargetMinutes };
+}
+
+function setDayMeta(dateKey, targetMinutes) {
+  state.days[dateKey] = { targetMinutes };
+  saveState();
+}
+
+function addCompensation(dateKey, minutes, note) {
+  state.compensations.push({ id: crypto.randomUUID(), date: dateKey, minutes, note: note || '' });
+  saveState();
+}
+
+function deleteCompensation(compensationId) {
+  state.compensations = state.compensations.filter((item) => item.id !== compensationId);
+  saveState();
+}
+
+/* --------------------------------------------------------------------------
+   Overtime / flextime calculations
+   -------------------------------------------------------------------------- */
+
+function getCompletedSessionsForDate(dateKey) {
+  return state.sessions.filter(
+    (session) => session.end !== null && toDateKey(new Date(session.start)) === dateKey
+  );
+}
+
+/** Sum of all completed work sessions for a day, each minus its own break. */
+function dayWorkedMinutes(dateKey) {
+  return getCompletedSessionsForDate(dateKey).reduce((sum, session) => {
+    const grossMinutes = (new Date(session.end) - new Date(session.start)) / 60000;
+    return sum + grossMinutes - (session.breakMinutes || 0);
+  }, 0);
+}
+
+/** Worked minutes minus that day's target. Only meaningful for tracked days. */
+function dayBalanceMinutes(dateKey) {
+  return dayWorkedMinutes(dateKey) - getDayMeta(dateKey).targetMinutes;
+}
+
+/** Every date that has at least one completed session (untracked days are excluded). */
+function getTrackedDateKeys() {
+  const keys = new Set();
+  state.sessions.forEach((session) => {
+    if (session.end !== null) keys.add(toDateKey(new Date(session.start)));
+  });
+  return Array.from(keys);
+}
+
+/**
+ * Global overtime balance: sum of each tracked day's balance, minus all
+ * compensation (time-off) minutes taken. Days with no tracked sessions are
+ * never included, so they never reduce the balance.
+ */
+function globalBalanceMinutes() {
+  const trackedTotal = getTrackedDateKeys().reduce((sum, dateKey) => sum + dayBalanceMinutes(dateKey), 0);
+  const compensationTotal = state.compensations.reduce((sum, comp) => sum + comp.minutes, 0);
+  return trackedTotal - compensationTotal;
+}
+
+/* --------------------------------------------------------------------------
+   Day grouping (shared by the "Heute" card and the Historie list)
+   -------------------------------------------------------------------------- */
+
+function getSessionsForDate(dateKey) {
+  return state.sessions
+    .filter((session) => toDateKey(new Date(session.start)) === dateKey)
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+}
+
+function getCompensationsForDate(dateKey) {
+  return state.compensations.filter((comp) => comp.date === dateKey);
+}
+
+function buildDayGroup(dateKey) {
+  return { dateKey, sessions: getSessionsForDate(dateKey), compensations: getCompensationsForDate(dateKey) };
+}
+
+/** All dates with any entry (session or compensation), newest first. */
+function buildHistoryGroups() {
+  const dateKeys = new Set();
+  state.sessions.forEach((session) => dateKeys.add(toDateKey(new Date(session.start))));
+  state.compensations.forEach((comp) => dateKeys.add(comp.date));
+  const groups = Array.from(dateKeys).map(buildDayGroup);
+  groups.sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1));
+  return groups;
+}
+
+/* --------------------------------------------------------------------------
+   Rendering
+   -------------------------------------------------------------------------- */
+
+// Shared inline icons (stroke-based, currentColor) so entry actions match the
+// tab bar's style instead of relying on emoji, which render inconsistently
+// across platforms/fonts.
+const ICON_EDIT =
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>';
+const ICON_DELETE =
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
+
+const toggleTrackingBtn = document.getElementById('toggle-tracking-btn');
+const addCompensationBtn = document.getElementById('add-compensation-btn');
+const addManualEntryBtn = document.getElementById('add-manual-entry-btn');
+const globalBalanceEl = document.getElementById('global-balance');
+const runningIndicatorEl = document.getElementById('running-indicator');
+const historyListEl = document.getElementById('history-list');
+const historyEmptyEl = document.getElementById('history-empty');
+const todayWorkedEl = document.getElementById('today-worked');
+const todayTargetEl = document.getElementById('today-target');
+const todayBalanceEl = document.getElementById('today-balance');
+const todayListEl = document.getElementById('today-list');
+const todayEmptyEl = document.getElementById('today-empty');
+
+let runningTimerInterval = null;
+let lastGlobalBalanceMinutes = null;
+let lastTodayBalanceMinutes = null;
+
+/** Restarts a CSS animation on an element by toggling its class via a reflow. */
+function playBounce(el) {
+  el.classList.remove('number-bounce');
+  void el.offsetWidth;
+  el.classList.add('number-bounce');
+}
+
+/** Tweens an element's text between two minute values using formatFn, ease-out. */
+function animateNumberChange(el, fromMinutes, toMinutes, formatFn, durationMs = 600) {
+  const start = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - start) / durationMs);
+    const eased = 1 - Math.pow(1 - t, 3);
+    const current = fromMinutes + (toMinutes - fromMinutes) * eased;
+    el.textContent = formatFn(t < 1 ? current : toMinutes);
+    if (t < 1) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+function renderAll() {
+  renderGlobalBalance();
+  renderToggleButton();
+  renderRunningIndicator();
+  renderToday();
+  renderHistory();
+}
+
+function renderGlobalBalance() {
+  const minutes = globalBalanceMinutes();
+  if (lastGlobalBalanceMinutes === null) {
+    globalBalanceEl.textContent = formatBalance(minutes);
+  } else if (minutes !== lastGlobalBalanceMinutes) {
+    animateNumberChange(globalBalanceEl, lastGlobalBalanceMinutes, minutes, formatBalance);
+    playBounce(globalBalanceEl);
+  }
+  globalBalanceEl.classList.toggle('positive', minutes >= 0);
+  globalBalanceEl.classList.toggle('negative', minutes < 0);
+  lastGlobalBalanceMinutes = minutes;
+}
+
+function renderToggleButton() {
+  const running = getRunningSession();
+  toggleTrackingBtn.textContent = running ? 'Stopp' : 'Start';
+  toggleTrackingBtn.classList.toggle('is-running', Boolean(running));
+}
+
+function renderRunningIndicator() {
+  const running = getRunningSession();
+  if (!running) {
+    runningIndicatorEl.hidden = true;
+    if (runningTimerInterval) {
+      clearInterval(runningTimerInterval);
+      runningTimerInterval = null;
+    }
+    return;
+  }
+  runningIndicatorEl.hidden = false;
+  document.getElementById('running-since').textContent = formatTime(running.start);
+  updateRunningElapsed(running.start);
+  if (!runningTimerInterval) {
+    runningTimerInterval = setInterval(() => updateRunningElapsed(running.start), 1000);
+  }
+}
+
+function updateRunningElapsed(startIso) {
+  const elapsedMinutes = (Date.now() - new Date(startIso).getTime()) / 60000;
+  document.getElementById('running-elapsed').textContent = formatHM(Math.floor(elapsedMinutes));
+}
+
+/** Dashboard "Heute" card: today's worked/target/balance stats + today's entries. */
+function renderToday() {
+  const dateKey = todayKey();
+  const meta = getDayMeta(dateKey);
+  const worked = dayWorkedMinutes(dateKey);
+  const balance = dayBalanceMinutes(dateKey);
+
+  todayWorkedEl.textContent = formatDurationHours(worked);
+  todayTargetEl.textContent = `${formatHM(meta.targetMinutes)}h`;
+  if (lastTodayBalanceMinutes === null) {
+    todayBalanceEl.textContent = formatBalance(balance);
+  } else if (balance !== lastTodayBalanceMinutes) {
+    animateNumberChange(todayBalanceEl, lastTodayBalanceMinutes, balance, formatBalance);
+    playBounce(todayBalanceEl);
+  }
+  todayBalanceEl.classList.toggle('positive', balance >= 0);
+  todayBalanceEl.classList.toggle('negative', balance < 0);
+  lastTodayBalanceMinutes = balance;
+
+  const group = buildDayGroup(dateKey);
+  const hasEntries = group.sessions.length > 0 || group.compensations.length > 0;
+  if (!hasEntries) {
+    todayListEl.innerHTML = '';
+    todayEmptyEl.hidden = false;
+    return;
+  }
+  todayEmptyEl.hidden = true;
+  todayListEl.innerHTML = group.sessions.map(renderSessionRow).join('') + group.compensations.map(renderCompensationRow).join('');
+  applyStaggerIndex(todayListEl.querySelectorAll('.entry-row'));
+}
+
+/** Sets a CSS custom property used by the entry-row/day-group fly-in animation delay. */
+function applyStaggerIndex(elements) {
+  elements.forEach((el, index) => el.style.setProperty('--i', index));
+}
+
+function renderHistory() {
+  const groups = buildHistoryGroups();
+  if (groups.length === 0) {
+    historyListEl.innerHTML = '';
+    historyEmptyEl.hidden = false;
+    return;
+  }
+  historyEmptyEl.hidden = true;
+  historyListEl.innerHTML = groups.map(renderDayGroup).join('');
+  applyStaggerIndex(historyListEl.querySelectorAll('.day-group'));
+  applyStaggerIndex(historyListEl.querySelectorAll('.entry-row'));
+}
+
+function renderDayGroup(group) {
+  const meta = getDayMeta(group.dateKey);
+  const hasCompletedSessions = group.sessions.some((session) => session.end !== null);
+  const balanceMinutes = hasCompletedSessions ? dayBalanceMinutes(group.dateKey) : null;
+  const balanceHtml =
+    balanceMinutes === null
+      ? ''
+      : `<span class="day-group-balance ${balanceMinutes >= 0 ? 'positive' : 'negative'}">${formatBalance(balanceMinutes)}</span>`;
+
+  return `
+    <div class="day-group">
+      <div class="day-group-header">
+        <div>
+          <div class="day-group-date">${escapeHtml(formatDateHeading(group.dateKey))}</div>
+          <button type="button" class="day-group-meta" data-action="edit-day" data-date="${group.dateKey}">Ziel ${formatHM(meta.targetMinutes)}h</button>
+        </div>
+        ${balanceHtml}
+      </div>
+      ${group.sessions.map(renderSessionRow).join('')}
+      ${group.compensations.map(renderCompensationRow).join('')}
+    </div>
+  `;
+}
+
+function renderSessionRow(session) {
+  const isRunning = session.end === null;
+  const startLabel = formatTime(session.start);
+  const endLabel = isRunning ? '…' : formatTime(session.end);
+  const durationLabel = isRunning
+    ? 'läuft'
+    : formatDurationHours((new Date(session.end) - new Date(session.start)) / 60000 - (session.breakMinutes || 0));
+  const subLabel = isRunning ? 'Arbeitszeit' : `Arbeitszeit &middot; Pause ${session.breakMinutes || 0}min`;
+  const noteHtml = session.note ? `<span class="entry-note">${escapeHtml(session.note)}</span>` : '';
+
+  return `
+    <div class="entry-row ${isRunning ? 'is-running' : ''}">
+      <div class="entry-info">
+        <span class="entry-time">${startLabel}&ndash;${endLabel}</span>
+        <span class="entry-sub">${subLabel}</span>
+        ${noteHtml}
+      </div>
+      <span class="entry-duration">${durationLabel}</span>
+      <button type="button" class="entry-edit-btn" data-action="edit-session" data-id="${session.id}" aria-label="Sitzung bearbeiten">${ICON_EDIT}</button>
+    </div>
+  `;
+}
+
+function renderCompensationRow(comp) {
+  return `
+    <div class="entry-row is-compensation">
+      <div class="entry-info">
+        <span class="entry-time">Ausgleich</span>
+        ${comp.note ? `<span class="entry-sub">${escapeHtml(comp.note)}</span>` : ''}
+      </div>
+      <span class="entry-duration">-${formatDurationHours(comp.minutes)}</span>
+      <button type="button" class="entry-edit-btn" data-action="delete-compensation" data-id="${comp.id}" aria-label="Ausgleich löschen">${ICON_DELETE}</button>
+    </div>
+  `;
+}
+
+/* --------------------------------------------------------------------------
+   View switching (Dashboard <-> Historie via bottom tab bar)
+   -------------------------------------------------------------------------- */
+
+const views = {
+  dashboard: document.getElementById('view-dashboard'),
+  history: document.getElementById('view-history'),
+};
+const tabButtons = document.querySelectorAll('.tab-btn');
+
+function switchView(name) {
+  Object.entries(views).forEach(([key, el]) => el.classList.toggle('is-active', key === name));
+  tabButtons.forEach((btn) => btn.classList.toggle('is-active', btn.dataset.view === name));
+  const activeView = views[name];
+  activeView.classList.remove('view-enter');
+  void activeView.offsetWidth;
+  activeView.classList.add('view-enter');
+}
+
+/* --------------------------------------------------------------------------
+   Dialog helpers
+   -------------------------------------------------------------------------- */
+
+const stopDialog = document.getElementById('stop-dialog');
+const compensationDialog = document.getElementById('compensation-dialog');
+const daySettingsDialog = document.getElementById('day-settings-dialog');
+const sessionEditDialog = document.getElementById('session-edit-dialog');
+const manualEntryDialog = document.getElementById('manual-entry-dialog');
+const confirmDialog = document.getElementById('confirm-dialog');
+const confirmMessageEl = document.getElementById('confirm-message');
+
+let pendingStopSessionId = null;
+let pendingDayDateKey = null;
+let pendingSessionEditId = null;
+let pendingConfirmResolve = null;
+
+/**
+ * Custom replacement for the native confirm() dialog, styled and animated
+ * like the rest of the app instead of the browser's default modal.
+ * Resolves true if the user confirms, false if they cancel/dismiss.
+ */
+function showConfirmDialog(message) {
+  return new Promise((resolve) => {
+    pendingConfirmResolve = resolve;
+    confirmMessageEl.textContent = message;
+    confirmDialog.returnValue = '';
+    confirmDialog.showModal();
+  });
+}
+
+function openStopDialog(sessionId) {
+  pendingStopSessionId = sessionId;
+  const session = state.sessions.find((item) => item.id === sessionId);
+  const dateKey = toDateKey(new Date(session.start));
+  const meta = getDayMeta(dateKey);
+  document.getElementById('stop-break-minutes').value = state.settings.defaultBreakMinutes;
+  document.getElementById('stop-target-time').value = formatHM(meta.targetMinutes);
+  document.getElementById('stop-note').value = '';
+  stopDialog.returnValue = '';
+  stopDialog.showModal();
+}
+
+function openCompensationDialog() {
+  document.getElementById('compensation-date').value = todayKey();
+  document.getElementById('compensation-time').value = '';
+  document.getElementById('compensation-note').value = '';
+  compensationDialog.returnValue = '';
+  compensationDialog.showModal();
+}
+
+function openDaySettingsDialog(dateKey) {
+  pendingDayDateKey = dateKey;
+  const meta = getDayMeta(dateKey);
+  document.getElementById('day-settings-date').textContent = `(${formatDateHeading(dateKey)})`;
+  document.getElementById('day-target-time').value = formatHM(meta.targetMinutes);
+  daySettingsDialog.returnValue = '';
+  daySettingsDialog.showModal();
+}
+
+function openSessionEditDialog(sessionId) {
+  pendingSessionEditId = sessionId;
+  const session = state.sessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  document.getElementById('session-edit-start').value = toTimeInputValue(session.start);
+  document.getElementById('session-edit-end').value = session.end ? toTimeInputValue(session.end) : '';
+  document.getElementById('session-edit-break').value = session.breakMinutes || 0;
+  document.getElementById('session-edit-note').value = session.note || '';
+  sessionEditDialog.returnValue = '';
+  sessionEditDialog.showModal();
+}
+
+function openManualEntryDialog() {
+  document.getElementById('manual-entry-date').value = todayKey();
+  document.getElementById('manual-entry-start').value = '';
+  document.getElementById('manual-entry-end').value = '';
+  document.getElementById('manual-entry-break').value = state.settings.defaultBreakMinutes;
+  document.getElementById('manual-entry-note').value = '';
+  manualEntryDialog.returnValue = '';
+  manualEntryDialog.showModal();
+}
+
+/* --------------------------------------------------------------------------
+   Event wiring
+   -------------------------------------------------------------------------- */
+
+function attachEventListeners() {
+  toggleTrackingBtn.addEventListener('click', () => {
+    const running = getRunningSession();
+    if (running) {
+      openStopDialog(running.id);
+    } else {
+      startSession();
+      renderAll();
+    }
+  });
+
+  addCompensationBtn.addEventListener('click', openCompensationDialog);
+  addManualEntryBtn.addEventListener('click', openManualEntryDialog);
+  todayTargetEl.addEventListener('click', () => openDaySettingsDialog(todayKey()));
+
+  tabButtons.forEach((btn) => {
+    btn.addEventListener('click', () => switchView(btn.dataset.view));
+  });
+
+  // Generic cancel/delete buttons shared across all dialogs.
+  document.querySelectorAll('[data-cancel]').forEach((btn) => {
+    btn.addEventListener('click', () => btn.closest('dialog').close('cancel'));
+  });
+  document.querySelectorAll('[data-delete]').forEach((btn) => {
+    btn.addEventListener('click', () => btn.closest('dialog').close('delete'));
+  });
+
+  stopDialog.addEventListener('close', () => {
+    if (stopDialog.returnValue !== 'confirm' || !pendingStopSessionId) return;
+    const breakMinutes = parseInt(document.getElementById('stop-break-minutes').value, 10) || 0;
+    const targetMinutes =
+      parseHM(document.getElementById('stop-target-time').value) ?? state.settings.defaultTargetMinutes;
+    const note = document.getElementById('stop-note').value.trim();
+    stopSession(pendingStopSessionId, breakMinutes, targetMinutes, note);
+    pendingStopSessionId = null;
+    renderAll();
+  });
+
+  compensationDialog.addEventListener('close', () => {
+    if (compensationDialog.returnValue !== 'confirm') return;
+    const dateKey = document.getElementById('compensation-date').value || todayKey();
+    const minutes = parseHM(document.getElementById('compensation-time').value);
+    if (!minutes) return;
+    const note = document.getElementById('compensation-note').value.trim();
+    addCompensation(dateKey, minutes, note);
+    renderAll();
+  });
+
+  daySettingsDialog.addEventListener('close', () => {
+    if (daySettingsDialog.returnValue !== 'confirm' || !pendingDayDateKey) return;
+    const targetMinutes =
+      parseHM(document.getElementById('day-target-time').value) ?? state.settings.defaultTargetMinutes;
+    setDayMeta(pendingDayDateKey, targetMinutes);
+    pendingDayDateKey = null;
+    renderAll();
+  });
+
+  sessionEditDialog.addEventListener('close', async () => {
+    if (sessionEditDialog.returnValue === 'delete' && pendingSessionEditId) {
+      const sessionIdToDelete = pendingSessionEditId;
+      pendingSessionEditId = null;
+      if (await showConfirmDialog('Diese Sitzung wirklich löschen?')) {
+        deleteSession(sessionIdToDelete);
+        renderAll();
+      }
+      return;
+    }
+    if (sessionEditDialog.returnValue !== 'confirm' || !pendingSessionEditId) return;
+    const session = state.sessions.find((item) => item.id === pendingSessionEditId);
+    if (!session) return;
+    const baseDate = new Date(session.start);
+
+    const startValue = document.getElementById('session-edit-start').value;
+    const [startHours, startMinutes] = startValue.split(':').map(Number);
+    const startDate = new Date(baseDate);
+    startDate.setHours(startHours, startMinutes, 0, 0);
+
+    let endDate = null;
+    const endValue = document.getElementById('session-edit-end').value;
+    if (endValue) {
+      const [endHours, endMinutes] = endValue.split(':').map(Number);
+      endDate = new Date(baseDate);
+      endDate.setHours(endHours, endMinutes, 0, 0);
+      // If end time appears before start, assume it rolled over past midnight.
+      if (endDate < startDate) endDate.setDate(endDate.getDate() + 1);
+    }
+
+    const breakMinutes = parseInt(document.getElementById('session-edit-break').value, 10) || 0;
+    const note = document.getElementById('session-edit-note').value.trim();
+    updateSession(pendingSessionEditId, startDate.toISOString(), endDate ? endDate.toISOString() : null, breakMinutes, note);
+    pendingSessionEditId = null;
+    renderAll();
+  });
+
+  manualEntryDialog.addEventListener('close', () => {
+    if (manualEntryDialog.returnValue !== 'confirm') return;
+    const dateKey = document.getElementById('manual-entry-date').value;
+    const startValue = document.getElementById('manual-entry-start').value;
+    const endValue = document.getElementById('manual-entry-end').value;
+    if (!dateKey || !startValue || !endValue) return;
+
+    const startDate = combineDateAndTime(dateKey, startValue);
+    const endDate = combineDateAndTime(dateKey, endValue);
+    // If end appears before/at start, assume it rolled over past midnight.
+    if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
+
+    const breakMinutes = parseInt(document.getElementById('manual-entry-break').value, 10) || 0;
+    const note = document.getElementById('manual-entry-note').value.trim();
+    addManualSession(startDate.toISOString(), endDate.toISOString(), breakMinutes, note);
+    renderAll();
+  });
+
+  confirmDialog.addEventListener('close', () => {
+    const resolve = pendingConfirmResolve;
+    pendingConfirmResolve = null;
+    resolve?.(confirmDialog.returnValue === 'confirm');
+  });
+
+  // Event delegation for dynamically rendered entry rows, shared by both lists.
+  async function handleListClick(event) {
+    const target = event.target.closest('[data-action]');
+    if (!target) return;
+    const action = target.dataset.action;
+    if (action === 'edit-day') {
+      openDaySettingsDialog(target.dataset.date);
+    } else if (action === 'edit-session') {
+      openSessionEditDialog(target.dataset.id);
+    } else if (action === 'delete-compensation') {
+      if (await showConfirmDialog('Ausgleichseintrag löschen?')) {
+        deleteCompensation(target.dataset.id);
+        renderAll();
+      }
+    }
+  }
+  historyListEl.addEventListener('click', handleListClick);
+  todayListEl.addEventListener('click', handleListClick);
+}
+
+/* --------------------------------------------------------------------------
+   Service worker registration (offline support)
+   -------------------------------------------------------------------------- */
+
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch((error) => {
+      console.error('kalika-track: service worker registration failed.', error);
+    });
+  });
+}
+
+/* --------------------------------------------------------------------------
+   Init
+   -------------------------------------------------------------------------- */
+
+attachEventListeners();
+registerServiceWorker();
+renderAll();

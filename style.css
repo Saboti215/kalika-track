@@ -1,0 +1,616 @@
+/* ==========================================================================
+   kalika-track - stylesheet
+   Mobile-first, high-contrast, auto light/dark via prefers-color-scheme.
+   ========================================================================== */
+
+:root {
+  /* Fir green accent palette */
+  --accent: #2d6a4f;
+  --accent-dark: #1b4332;
+  --accent-light: #40916c;
+
+  /* Height reserved at the bottom of the page for the fixed tab bar. */
+  --tab-bar-height: 4.5rem;
+
+  --positive: #2d6a4f;
+  --negative: #b3261e;
+
+  /* Light theme (default) */
+  --bg: #f4f6f4;
+  --bg-elevated: #ffffff;
+  --text: #12201a;
+  --text-muted: #55645c;
+  --border: #d8e0da;
+  --shadow: rgba(20, 40, 30, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1c14;
+    --bg-elevated: #17281d;
+    --text: #eef4ef;
+    --text-muted: #a9bcb0;
+    --border: #26392c;
+    --shadow: rgba(0, 0, 0, 0.4);
+
+    --positive: #74c69d;
+    --negative: #e5877e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ---------- Animation keyframes ---------- */
+
+@keyframes headerDrop {
+  from { opacity: 0; transform: translateY(-16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes flyInBounce {
+  0% { opacity: 0; transform: translateY(32px) scale(0.9); }
+  60% { opacity: 1; transform: translateY(-6px) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes popIn {
+  0% { opacity: 0; transform: scale(0.82); }
+  65% { opacity: 1; transform: scale(1.04); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes backdropFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.45); }
+  50% { box-shadow: 0 0 0 11px rgba(220, 38, 38, 0); }
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.7); }
+}
+
+@keyframes numberBounce {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.14); }
+  60% { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100%;
+}
+
+body {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: calc(var(--tab-bar-height) + env(safe-area-inset-bottom));
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Header ---------- */
+
+.app-header {
+  text-align: center;
+  padding: 1.5rem 1rem 1.75rem;
+  background: linear-gradient(180deg, var(--accent-dark), var(--accent));
+  color: #f4f6f4;
+  border-radius: 0 0 1.5rem 1.5rem;
+  animation: headerDrop 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.app-title {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.balance-label {
+  margin: 0;
+  font-size: 0.95rem;
+  opacity: 0.85;
+}
+
+.balance-value {
+  margin: 0.25rem 0 0;
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  display: inline-block;
+}
+
+.number-bounce {
+  animation: numberBounce 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.running-indicator {
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+  opacity: 0.9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+/* Equal-specificity guard: [hidden] and .running-indicator both have a
+   single-selector specificity, so without this the class's `display: flex`
+   (needed to lay out the pulsing dot) would win over the browser's built-in
+   `[hidden] { display: none }` and the element would stay visible. */
+.running-indicator[hidden] {
+  display: none;
+}
+
+.running-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+
+/* The header always sits on the dark fir-green gradient, in both light and
+   dark theme, so its balance color needs its own fixed on-dark palette
+   instead of the page-wide --positive/--negative (which are tuned against
+   the page background and would lose contrast here in light mode). */
+.app-header .positive {
+  color: #95d5b2;
+}
+
+.app-header .negative {
+  color: #ffb4a8;
+}
+
+/* ---------- View switching (Dashboard <-> Historie tab bar) ---------- */
+
+.view {
+  display: none;
+  flex: 1;
+  padding: 0.75rem 1rem 1rem;
+}
+
+.view.is-active {
+  display: block;
+}
+
+.view-enter {
+  animation: fadeSlideUp 340ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ---------- Actions ---------- */
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.actions .btn {
+  animation: fadeSlideUp 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.actions .btn:nth-child(1) {
+  animation-delay: 80ms;
+}
+
+.actions .btn:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.btn {
+  appearance: none;
+  border: none;
+  border-radius: 0.9rem;
+  font-size: 1rem;
+  font-weight: 600;
+  padding: 0.95rem 1.25rem;
+  min-height: 3rem;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s ease, background-color 200ms ease;
+}
+
+.btn:active {
+  transform: scale(0.96);
+}
+
+.btn-large {
+  font-size: 1.25rem;
+  padding: 1.15rem 1.25rem;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fdfffe;
+}
+
+.btn-primary.is-running {
+  background: var(--negative);
+  animation: pulseGlow 1.8s ease-out infinite;
+}
+
+.btn-secondary {
+  background: var(--bg-elevated);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.btn-danger {
+  background: transparent;
+  color: var(--negative);
+  margin-right: auto;
+}
+
+.btn-danger-solid {
+  background: var(--negative);
+  color: #fff;
+}
+
+/* ---------- Today card (Dashboard) ---------- */
+
+.today-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1rem;
+  animation: fadeSlideUp 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 220ms;
+}
+
+.section-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.today-stats {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.today-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 1;
+}
+
+.today-stat-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.today-stat-value {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.stat-edit-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+}
+
+.today-list {
+  margin-top: 0.5rem;
+}
+
+/* ---------- History / list view ---------- */
+
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.history-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.btn-compact {
+  padding: 0.55rem 0.9rem;
+  font-size: 0.85rem;
+  min-height: auto;
+}
+
+.history-empty {
+  color: var(--text-muted);
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.day-group {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  margin-bottom: 0.9rem;
+  overflow: hidden;
+  animation: fadeSlideUp 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(min(var(--i, 0), 8) * 70ms);
+}
+
+.day-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.85rem 1rem 0.5rem;
+  gap: 0.5rem;
+}
+
+.day-group-date {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.day-group-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+}
+
+.day-group-balance {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.entry-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--border);
+  gap: 0.75rem;
+  animation: flyInBounce 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: calc(min(var(--i, 0), 14) * 45ms);
+}
+
+.entry-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.entry-time {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.entry-sub {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.entry-note {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.entry-duration {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.entry-row.is-compensation .entry-duration {
+  color: var(--negative);
+}
+
+.entry-row.is-running .entry-duration {
+  color: var(--accent-light);
+}
+
+.entry-edit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0.35rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.entry-edit-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.positive { color: var(--positive); }
+.negative { color: var(--negative); }
+
+/* ---------- Dialogs ---------- */
+
+.app-dialog {
+  border: none;
+  border-radius: 1.1rem;
+  padding: 0;
+  width: min(90vw, 26rem);
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: 0 20px 50px var(--shadow);
+}
+
+.app-dialog[open] {
+  animation: popIn 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.app-dialog::backdrop {
+  background: rgba(10, 20, 15, 0.5);
+  animation: backdropFade 220ms ease-out both;
+}
+
+.app-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 1.5rem;
+}
+
+.app-dialog h3 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.confirm-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.field input {
+  font-size: 1rem;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+/* Dialogs can hold up to three action buttons (delete/cancel/save) side by
+   side; compact padding keeps all three on one row on narrow phones
+   (iPhone SE and similar). flex-wrap above is a safety net for anything
+   narrower still. */
+.dialog-actions .btn {
+  padding: 0.65rem 0.9rem;
+  font-size: 0.9rem;
+  min-height: 2.75rem;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.65rem;
+}
+
+/* ---------- Bottom tab bar (Dashboard <-> Historie) ---------- */
+
+.tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  background: none;
+  border: none;
+  padding: 0.6rem 0 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.tab-icon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.tab-btn.is-active {
+  color: var(--accent);
+}
+
+@media (prefers-color-scheme: dark) {
+  .tab-btn.is-active {
+    color: var(--accent-light);
+  }
+}
+
+@media (min-width: 640px) {
+  body {
+    max-width: 32rem;
+    margin: 0 auto;
+  }
+
+  .tab-bar {
+    max-width: 32rem;
+    margin: 0 auto;
+  }
+}

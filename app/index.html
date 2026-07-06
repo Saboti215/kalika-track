@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>kalika-track</title>
+
+  <!-- PWA manifest -->
+  <link rel="manifest" href="./manifest.json" />
+
+  <!-- Theme color for browser UI, light/dark aware -->
+  <meta name="theme-color" content="#f4f6f4" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0f1c14" media="(prefers-color-scheme: dark)" />
+
+  <!-- iOS "Add to Home Screen" support -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="kalika-track" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+
+  <link rel="icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <!-- Header: prominent global overtime balance, always visible on every view -->
+  <header class="app-header">
+    <canvas id="header-canvas" class="header-canvas" aria-hidden="true"></canvas>
+    <div class="header-content">
+      <p class="app-title">kalika-track</p>
+      <p class="balance-label">Aktuelle Überstunden</p>
+      <p id="global-balance" class="balance-value">+00:00h</p>
+      <div id="running-indicator" class="running-indicator" hidden>
+        <p class="running-meta"><span class="running-dot" aria-hidden="true"></span>Läuft seit <span id="running-since"></span></p>
+        <p id="running-elapsed" class="running-elapsed">0:00:00</p>
+      </div>
+    </div>
+  </header>
+
+  <!-- Dashboard: start page with timer control and today's overview -->
+  <main id="view-dashboard" class="view is-active">
+    <div class="actions">
+      <button id="toggle-tracking-btn" class="btn btn-primary btn-large" type="button">Start</button>
+    </div>
+
+    <section class="today-card">
+      <h2 class="section-title">Heute</h2>
+      <div class="today-stats">
+        <div class="today-stat">
+          <span class="today-stat-label">Gearbeitet</span>
+          <span id="today-worked" class="today-stat-value">0:00h</span>
+        </div>
+        <div class="today-stat">
+          <span class="today-stat-label">Ziel</span>
+          <button type="button" id="today-target" class="today-stat-value stat-edit-btn">8:00h</button>
+        </div>
+        <div class="today-stat">
+          <span class="today-stat-label">Saldo heute</span>
+          <span id="today-balance" class="today-stat-value">+00:00h</span>
+        </div>
+      </div>
+      <div id="today-list" class="today-list"></div>
+      <p id="today-empty" class="history-empty" hidden>Heute noch keine Einträge.</p>
+    </section>
+  </main>
+
+  <!-- History: full list of all entries, grouped by day -->
+  <section id="view-history" class="view">
+    <h2 class="history-title">Alle Einträge</h2>
+
+    <div id="backup-reminder" class="backup-reminder" hidden>
+      <p id="backup-reminder-text" class="backup-reminder-text"></p>
+      <div class="backup-reminder-actions">
+        <button id="backup-reminder-export-btn" type="button" class="btn btn-primary btn-compact">Jetzt exportieren</button>
+        <button id="backup-reminder-dismiss-btn" type="button" class="btn-icon-ghost" aria-label="Erinnerung ausblenden">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="history-actions">
+      <button id="add-manual-entry-btn" class="btn btn-secondary btn-compact" type="button">Eintrag hinzufügen</button>
+      <button id="add-compensation-btn" class="btn btn-secondary btn-compact" type="button">Ausgleich hinzufügen</button>
+    </div>
+    <div class="history-actions">
+      <button id="export-csv-btn" class="btn btn-secondary btn-compact" type="button">CSV exportieren</button>
+      <button id="import-csv-btn" class="btn btn-secondary btn-compact" type="button">CSV importieren</button>
+      <input type="file" id="import-csv-input" accept=".csv,text/csv" hidden />
+    </div>
+    <p class="csv-tip">Tipp: Beim Teilen "In Dateien sichern" wählen, um dein Backup in iCloud Drive abzulegen.</p>
+    <div id="history-list" class="history-list"></div>
+    <p id="history-empty" class="history-empty" hidden>Noch keine Einträge vorhanden.</p>
+  </section>
+
+  <!-- Bottom tab bar navigation -->
+  <nav class="tab-bar">
+    <button type="button" class="tab-btn is-active" data-view="dashboard">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      <span>Dashboard</span>
+    </button>
+    <button type="button" class="tab-btn" data-view="history">
+      <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+      <span>Historie</span>
+    </button>
+  </nav>
+
+  <!-- Dialog: shown when stopping a running session -->
+  <dialog id="stop-dialog" class="app-dialog">
+    <form id="stop-form" method="dialog">
+      <h3>Sitzung beenden</h3>
+      <label class="field">
+        <span>Pause (Minuten)</span>
+        <input type="number" id="stop-break-minutes" min="0" step="1" inputmode="numeric" required />
+      </label>
+      <label class="field">
+        <span>Zielarbeitszeit heute (Stunden:Minuten)</span>
+        <input type="text" id="stop-target-time" placeholder="8:00" inputmode="numeric" required />
+      </label>
+      <label class="field">
+        <span>Notiz (optional)</span>
+        <input type="text" id="stop-note" placeholder="z. B. Projekt X" />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: add a compensation (time off) entry -->
+  <dialog id="compensation-dialog" class="app-dialog">
+    <form id="compensation-form" method="dialog">
+      <h3>Überstunden ausgleichen</h3>
+      <label class="field">
+        <span>Datum</span>
+        <input type="date" id="compensation-date" required />
+      </label>
+      <label class="field">
+        <span>Zeit (Stunden:Minuten)</span>
+        <input type="text" id="compensation-time" placeholder="4:00" inputmode="numeric" required />
+      </label>
+      <label class="field">
+        <span>Notiz (optional)</span>
+        <input type="text" id="compensation-note" placeholder="z. B. früher gegangen" />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: edit a day's target time (break now lives per-session) -->
+  <dialog id="day-settings-dialog" class="app-dialog">
+    <form id="day-settings-form" method="dialog">
+      <h3>Zielzeit <span id="day-settings-date"></span></h3>
+      <label class="field">
+        <span>Zielarbeitszeit (Stunden:Minuten)</span>
+        <input type="text" id="day-target-time" placeholder="8:00" inputmode="numeric" required />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: edit an existing session's start/end time and break -->
+  <dialog id="session-edit-dialog" class="app-dialog">
+    <form id="session-edit-form" method="dialog">
+      <h3>Sitzung bearbeiten</h3>
+      <label class="field">
+        <span>Start</span>
+        <input type="time" id="session-edit-start" required />
+      </label>
+      <label class="field">
+        <span>Ende</span>
+        <input type="time" id="session-edit-end" />
+      </label>
+      <label class="field">
+        <span>Pause (Minuten)</span>
+        <input type="number" id="session-edit-break" min="0" step="1" inputmode="numeric" required />
+      </label>
+      <label class="field">
+        <span>Notiz (optional)</span>
+        <input type="text" id="session-edit-note" placeholder="z. B. Projekt X" />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-danger btn-icon" data-delete aria-label="Sitzung löschen">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        </button>
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: add a retroactive/manual session entry -->
+  <dialog id="manual-entry-dialog" class="app-dialog">
+    <form id="manual-entry-form" method="dialog">
+      <h3>Eintrag hinzufügen</h3>
+      <label class="field">
+        <span>Datum</span>
+        <input type="date" id="manual-entry-date" required />
+      </label>
+      <label class="field">
+        <span>Start</span>
+        <input type="time" id="manual-entry-start" required />
+      </label>
+      <label class="field">
+        <span>Ende</span>
+        <input type="time" id="manual-entry-end" required />
+      </label>
+      <label class="field">
+        <span>Pause (Minuten)</span>
+        <input type="number" id="manual-entry-break" min="0" step="1" inputmode="numeric" required />
+      </label>
+      <label class="field">
+        <span>Notiz (optional)</span>
+        <input type="text" id="manual-entry-note" placeholder="z. B. Projekt X" />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: custom confirmation prompt, replaces the native confirm() -->
+  <dialog id="confirm-dialog" class="app-dialog">
+    <form id="confirm-form" method="dialog">
+      <h3>Wirklich löschen?</h3>
+      <p id="confirm-message" class="confirm-message"></p>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-danger-solid" value="confirm">Löschen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: review + confirm a CSV import before it's applied -->
+  <dialog id="import-dialog" class="app-dialog">
+    <form id="import-form" method="dialog">
+      <h3>CSV importieren</h3>
+      <p id="import-summary" class="confirm-message"></p>
+      <div id="import-errors" class="import-errors" hidden></div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm" id="import-confirm-btn">Importieren</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="./app.js"></script>
+</body>
+</html>

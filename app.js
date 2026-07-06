@@ -18,7 +18,7 @@ function createDefaultState() {
     sessions: [], // { id, start: ISO string, end: ISO string|null, breakMinutes, note }
     days: {}, // dateKey -> { targetMinutes }
     compensations: [], // { id, date: dateKey, minutes, note }
-    settings: { defaultTargetMinutes: 480, defaultBreakMinutes: 30 },
+    settings: { defaultTargetMinutes: 480, defaultBreakMinutes: 30, lastExportAt: null, backupReminderSnoozedUntil: null },
   };
 }
 
@@ -56,6 +56,8 @@ function loadState() {
     const settings = {
       defaultTargetMinutes: parsed.settings?.defaultTargetMinutes ?? 480,
       defaultBreakMinutes: parsed.settings?.defaultBreakMinutes ?? 30,
+      lastExportAt: parsed.settings?.lastExportAt ?? null,
+      backupReminderSnoozedUntil: parsed.settings?.backupReminderSnoozedUntil ?? null,
     };
 
     if ((parsed.version ?? 1) < 2) {
@@ -386,8 +388,40 @@ function downloadTextFile(filename, content, mimeType) {
   URL.revokeObjectURL(url);
 }
 
-function exportEntriesAsCsv() {
-  downloadTextFile(`kalika-track-export-${todayKey()}.csv`, buildExportCsv(), 'text/csv;charset=utf-8;');
+/**
+ * Attempts to hand the CSV off to the OS share sheet (iCloud Drive, AirDrop,
+ * Mail, ...) via the Web Share API. Returns:
+ * - 'shared'      the user completed a share (or a compatible download)
+ * - 'cancelled'   the user dismissed the share sheet; respect that, no fallback
+ * - 'unsupported' Web Share (with files) isn't available here; caller should fall back
+ */
+async function tryShareCsv(filename, csvContent) {
+  if (!navigator.canShare || !navigator.share) return 'unsupported';
+  try {
+    const file = new File(['﻿' + csvContent], filename, { type: 'text/csv' });
+    if (!navigator.canShare({ files: [file] })) return 'unsupported';
+    await navigator.share({ files: [file], title: 'kalika-track Export' });
+    return 'shared';
+  } catch (error) {
+    if (error?.name === 'AbortError') return 'cancelled';
+    console.error('kalika-track: sharing the export failed, falling back to download.', error);
+    return 'unsupported';
+  }
+}
+
+function recordExportTimestamp() {
+  state.settings.lastExportAt = new Date().toISOString();
+  saveState();
+}
+
+async function exportEntriesAsCsv() {
+  const filename = `kalika-track-export-${todayKey()}.csv`;
+  const csvContent = buildExportCsv();
+  const outcome = await tryShareCsv(filename, csvContent);
+  if (outcome === 'cancelled') return; // user actively declined; don't force a download too
+  if (outcome === 'unsupported') downloadTextFile(filename, csvContent, 'text/csv;charset=utf-8;');
+  recordExportTimestamp();
+  renderBackupReminder();
 }
 
 function detectCsvDelimiter(text) {
@@ -574,6 +608,13 @@ const todayTargetEl = document.getElementById('today-target');
 const todayBalanceEl = document.getElementById('today-balance');
 const todayListEl = document.getElementById('today-list');
 const todayEmptyEl = document.getElementById('today-empty');
+const backupReminderEl = document.getElementById('backup-reminder');
+const backupReminderTextEl = document.getElementById('backup-reminder-text');
+const backupReminderExportBtn = document.getElementById('backup-reminder-export-btn');
+const backupReminderDismissBtn = document.getElementById('backup-reminder-dismiss-btn');
+
+const BACKUP_REMINDER_INTERVAL_DAYS = 30;
+const BACKUP_REMINDER_SNOOZE_DAYS = 7;
 
 let runningTimerInterval = null;
 let lastGlobalBalanceMinutes = null;
@@ -605,6 +646,29 @@ function renderAll() {
   renderRunningIndicator();
   renderToday();
   renderHistory();
+  renderBackupReminder();
+}
+
+/** Dismissible reminder banner on the Historie page when no recent backup exists. */
+function renderBackupReminder() {
+  const { lastExportAt, backupReminderSnoozedUntil } = state.settings;
+  const now = new Date();
+
+  if (backupReminderSnoozedUntil && new Date(backupReminderSnoozedUntil) > now) {
+    backupReminderEl.hidden = true;
+    return;
+  }
+
+  const daysSinceExport = lastExportAt ? Math.floor((now - new Date(lastExportAt)) / (1000 * 60 * 60 * 24)) : null;
+  const isOverdue = daysSinceExport === null || daysSinceExport >= BACKUP_REMINDER_INTERVAL_DAYS;
+  if (!isOverdue) {
+    backupReminderEl.hidden = true;
+    return;
+  }
+
+  backupReminderTextEl.textContent =
+    daysSinceExport === null ? 'Du hast noch kein Backup deiner Daten erstellt.' : `Letztes Backup vor ${daysSinceExport} Tagen.`;
+  backupReminderEl.hidden = false;
 }
 
 function renderGlobalBalance() {
@@ -919,6 +983,15 @@ function attachEventListeners() {
     if (!file) return;
     const text = await file.text();
     openImportDialog(parseImportCsv(text));
+  });
+
+  backupReminderExportBtn.addEventListener('click', exportEntriesAsCsv);
+  backupReminderDismissBtn.addEventListener('click', () => {
+    const snoozeUntil = new Date();
+    snoozeUntil.setDate(snoozeUntil.getDate() + BACKUP_REMINDER_SNOOZE_DAYS);
+    state.settings.backupReminderSnoozedUntil = snoozeUntil.toISOString();
+    saveState();
+    renderBackupReminder();
   });
 
   tabButtons.forEach((btn) => {

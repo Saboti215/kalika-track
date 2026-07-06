@@ -7,7 +7,7 @@
    up the new version instead of serving stale assets forever.
    ========================================================================== */
 
-const CACHE_VERSION = 'kalika-track-v2';
+const CACHE_VERSION = 'kalika-track-v3';
 
 const APP_SHELL_FILES = [
   './',

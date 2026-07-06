@@ -121,6 +121,15 @@ function formatHM(totalMinutes) {
   return `${hours}:${pad2(remainder)}`;
 }
 
+/** Formats a live-running duration in seconds as "H:MM:SS", e.g. "1:23:45". */
+function formatElapsedClock(totalSeconds) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainderSeconds = seconds % 60;
+  return `${hours}:${pad2(minutes)}:${pad2(remainderSeconds)}`;
+}
+
 /** Formats a signed balance in minutes as "+HH:MMh" / "-HH:MMh". */
 function formatBalance(totalMinutes) {
   const sign = totalMinutes < 0 ? '-' : '+';
@@ -412,8 +421,8 @@ function renderRunningIndicator() {
 }
 
 function updateRunningElapsed(startIso) {
-  const elapsedMinutes = (Date.now() - new Date(startIso).getTime()) / 60000;
-  document.getElementById('running-elapsed').textContent = formatHM(Math.floor(elapsedMinutes));
+  const elapsedSeconds = (Date.now() - new Date(startIso).getTime()) / 1000;
+  document.getElementById('running-elapsed').textContent = formatElapsedClock(elapsedSeconds);
 }
 
 /** Dashboard "Heute" card: today's worked/target/balance stats + today's entries. */
@@ -769,6 +778,116 @@ function attachEventListeners() {
 }
 
 /* --------------------------------------------------------------------------
+   Header background animation (slowly drifting particle network)
+   Purely decorative; pauses while the app is backgrounded to save battery
+   and renders a single static frame if the user prefers reduced motion.
+   -------------------------------------------------------------------------- */
+
+function initHeaderNetworkAnimation() {
+  const canvas = document.getElementById('header-canvas');
+  if (!canvas || !canvas.getContext) return;
+  const ctx = canvas.getContext('2d');
+
+  const PARTICLE_COUNT = 22;
+  const MAX_LINK_DISTANCE = 90;
+  const SPEED = 0.12;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let width = 0;
+  let height = 0;
+  let particles = [];
+  let running = false;
+  let animationFrameId = null;
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    width = rect.width;
+    height = rect.height;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function createParticles() {
+    particles = Array.from({ length: PARTICLE_COUNT }, () => ({
+      x: Math.random() * width,
+      y: Math.random() * height,
+      vx: (Math.random() - 0.5) * SPEED,
+      vy: (Math.random() - 0.5) * SPEED,
+    }));
+  }
+
+  function drawFrame() {
+    ctx.clearRect(0, 0, width, height);
+
+    particles.forEach((particle) => {
+      particle.x += particle.vx;
+      particle.y += particle.vy;
+      if (particle.x < 0) particle.x = width;
+      if (particle.x > width) particle.x = 0;
+      if (particle.y < 0) particle.y = height;
+      if (particle.y > height) particle.y = 0;
+    });
+
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance < MAX_LINK_DISTANCE) {
+          ctx.strokeStyle = `rgba(255, 255, 255, ${0.22 * (1 - distance / MAX_LINK_DISTANCE)})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    particles.forEach((particle) => {
+      ctx.beginPath();
+      ctx.arc(particle.x, particle.y, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    if (running) animationFrameId = requestAnimationFrame(drawFrame);
+  }
+
+  function start() {
+    if (running) return;
+    running = true;
+    animationFrameId = requestAnimationFrame(drawFrame);
+  }
+
+  function stop() {
+    running = false;
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+
+  resizeCanvas();
+  createParticles();
+
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (prefersReducedMotion) {
+    drawFrame(); // single static frame, no ongoing animation
+  } else {
+    start();
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stop();
+      else start();
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    resizeCanvas();
+    createParticles();
+  });
+}
+
+/* --------------------------------------------------------------------------
    Service worker registration (offline support)
    -------------------------------------------------------------------------- */
 
@@ -787,4 +906,5 @@ function registerServiceWorker() {
 
 attachEventListeners();
 registerServiceWorker();
+initHeaderNetworkAnimation();
 renderAll();

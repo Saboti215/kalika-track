@@ -119,12 +119,28 @@ body {
 /* ---------- Header ---------- */
 
 .app-header {
+  position: relative;
+  overflow: hidden;
   text-align: center;
   padding: 1.5rem 1rem 1.75rem;
   background: linear-gradient(180deg, var(--accent-dark), var(--accent));
   color: #f4f6f4;
   border-radius: 0 0 1.5rem 1.5rem;
   animation: headerDrop 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Slowly drifting particle-network canvas, purely decorative background. */
+.header-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.header-content {
+  position: relative;
+  z-index: 1;
 }
 
 .app-title {
@@ -157,20 +173,24 @@ body {
 
 .running-indicator {
   margin: 0.75rem 0 0;
+}
+
+/* Equal-specificity guard: [hidden] and .running-indicator both would end up
+   with a single-selector specificity once this class carries layout rules,
+   so without this the browser's built-in `[hidden] { display: none }` could
+   lose the cascade and the element would stay visible. */
+.running-indicator[hidden] {
+  display: none;
+}
+
+.running-meta {
+  margin: 0;
   font-size: 0.9rem;
   opacity: 0.9;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-}
-
-/* Equal-specificity guard: [hidden] and .running-indicator both have a
-   single-selector specificity, so without this the class's `display: flex`
-   (needed to lay out the pulsing dot) would win over the browser's built-in
-   `[hidden] { display: none }` and the element would stay visible. */
-.running-indicator[hidden] {
-  display: none;
 }
 
 .running-dot {
@@ -180,6 +200,14 @@ body {
   border-radius: 50%;
   background: currentColor;
   animation: pulseDot 1.4s ease-in-out infinite;
+}
+
+.running-elapsed {
+  margin: 0.15rem 0 0;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The header always sits on the dark fir-green gradient, in both light and
@@ -221,14 +249,7 @@ body {
 
 .actions .btn {
   animation: fadeSlideUp 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.actions .btn:nth-child(1) {
   animation-delay: 80ms;
-}
-
-.actions .btn:nth-child(2) {
-  animation-delay: 150ms;
 }
 
 .btn {
@@ -343,18 +364,22 @@ body {
 
 /* ---------- History / list view ---------- */
 
-.history-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
-}
-
 .history-title {
   font-size: 1.05rem;
   font-weight: 700;
-  margin: 0;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.history-actions .btn {
+  flex: 1 1 auto;
+  min-width: 9rem;
 }
 
 .btn-compact {

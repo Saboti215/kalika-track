@@ -24,17 +24,22 @@
 <body>
   <!-- Header: prominent global overtime balance, always visible on every view -->
   <header class="app-header">
-    <p class="app-title">kalika-track</p>
-    <p class="balance-label">Aktuelle Überstunden</p>
-    <p id="global-balance" class="balance-value">+00:00h</p>
-    <p id="running-indicator" class="running-indicator" hidden><span class="running-dot" aria-hidden="true"></span>Läuft seit <span id="running-since"></span> · <span id="running-elapsed">00:00</span></p>
+    <canvas id="header-canvas" class="header-canvas" aria-hidden="true"></canvas>
+    <div class="header-content">
+      <p class="app-title">kalika-track</p>
+      <p class="balance-label">Aktuelle Überstunden</p>
+      <p id="global-balance" class="balance-value">+00:00h</p>
+      <div id="running-indicator" class="running-indicator" hidden>
+        <p class="running-meta"><span class="running-dot" aria-hidden="true"></span>Läuft seit <span id="running-since"></span></p>
+        <p id="running-elapsed" class="running-elapsed">0:00:00</p>
+      </div>
+    </div>
   </header>
 
   <!-- Dashboard: start page with timer control and today's overview -->
   <main id="view-dashboard" class="view is-active">
     <div class="actions">
       <button id="toggle-tracking-btn" class="btn btn-primary btn-large" type="button">Start</button>
-      <button id="add-compensation-btn" class="btn btn-secondary" type="button">Ausgleich hinzufügen</button>
     </div>
 
     <section class="today-card">
@@ -60,9 +65,10 @@
 
   <!-- History: full list of all entries, grouped by day -->
   <section id="view-history" class="view">
-    <div class="history-header">
-      <h2 class="history-title">Alle Einträge</h2>
+    <h2 class="history-title">Alle Einträge</h2>
+    <div class="history-actions">
       <button id="add-manual-entry-btn" class="btn btn-secondary btn-compact" type="button">Eintrag hinzufügen</button>
+      <button id="add-compensation-btn" class="btn btn-secondary btn-compact" type="button">Ausgleich hinzufügen</button>
     </div>
     <div id="history-list" class="history-list"></div>
     <p id="history-empty" class="history-empty" hidden>Noch keine Einträge vorhanden.</p>

@@ -173,6 +173,12 @@ function formatDateHeading(dateKey) {
   }).format(date);
 }
 
+function formatMonthHeading(monthKey) {
+  const [year, month] = monthKey.split('-').map(Number);
+  const date = new Date(year, month - 1, 1);
+  return new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' }).format(date);
+}
+
 /** Converts an ISO timestamp to a local "HH:MM" value for <input type="time">. */
 function toTimeInputValue(isoString) {
   const date = new Date(isoString);
@@ -300,6 +306,17 @@ function globalBalanceMinutes() {
   return trackedTotal - compensationTotal;
 }
 
+/** Same as globalBalanceMinutes(), but scoped to a single "YYYY-MM" month. */
+function monthBalanceMinutes(monthKey) {
+  const trackedTotal = getTrackedDateKeys()
+    .filter((dateKey) => dateKey.startsWith(monthKey))
+    .reduce((sum, dateKey) => sum + dayBalanceMinutes(dateKey), 0);
+  const compensationTotal = state.compensations
+    .filter((comp) => comp.date.startsWith(monthKey))
+    .reduce((sum, comp) => sum + comp.minutes, 0);
+  return trackedTotal - compensationTotal;
+}
+
 /* --------------------------------------------------------------------------
    Day grouping (shared by the "Heute" card and the Historie list)
    -------------------------------------------------------------------------- */
@@ -326,6 +343,22 @@ function buildHistoryGroups() {
   const groups = Array.from(dateKeys).map(buildDayGroup);
   groups.sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1));
   return groups;
+}
+
+/** Day groups bucketed by "YYYY-MM" month, newest month first (order inherited from buildHistoryGroups). */
+function buildHistoryMonths() {
+  const months = [];
+  const byKey = new Map();
+  buildHistoryGroups().forEach((dayGroup) => {
+    const monthKey = dayGroup.dateKey.slice(0, 7);
+    if (!byKey.has(monthKey)) {
+      const month = { monthKey, days: [] };
+      byKey.set(monthKey, month);
+      months.push(month);
+    }
+    byKey.get(monthKey).days.push(dayGroup);
+  });
+  return months;
 }
 
 /* --------------------------------------------------------------------------
@@ -619,6 +652,8 @@ const BACKUP_REMINDER_SNOOZE_DAYS = 7;
 let runningTimerInterval = null;
 let lastGlobalBalanceMinutes = null;
 let lastTodayBalanceMinutes = null;
+/** Which "YYYY-MM" months are expanded in the Historie view. Empty = all collapsed. */
+const expandedMonths = new Set();
 
 /** Restarts a CSS animation on an element by toggling its class via a reflow. */
 function playBounce(el) {
@@ -750,16 +785,34 @@ function applyStaggerIndex(elements) {
 }
 
 function renderHistory() {
-  const groups = buildHistoryGroups();
-  if (groups.length === 0) {
+  const months = buildHistoryMonths();
+  if (months.length === 0) {
     historyListEl.innerHTML = '';
     historyEmptyEl.hidden = false;
     return;
   }
   historyEmptyEl.hidden = true;
-  historyListEl.innerHTML = groups.map(renderDayGroup).join('');
-  applyStaggerIndex(historyListEl.querySelectorAll('.day-group'));
-  applyStaggerIndex(historyListEl.querySelectorAll('.entry-row'));
+  historyListEl.innerHTML = months.map(renderMonthGroup).join('');
+  applyStaggerIndex(historyListEl.querySelectorAll('.month-group'));
+}
+
+/** One collapsible month row: header (month name + month balance) plus its day groups. */
+function renderMonthGroup(month) {
+  const balance = monthBalanceMinutes(month.monthKey);
+  const isExpanded = expandedMonths.has(month.monthKey);
+
+  return `
+    <div class="month-group ${isExpanded ? 'is-expanded' : ''}" data-month="${month.monthKey}">
+      <button type="button" class="month-group-header" data-action="toggle-month" data-month="${month.monthKey}" aria-expanded="${isExpanded}">
+        <svg class="month-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        <span class="month-group-title">${escapeHtml(formatMonthHeading(month.monthKey))}</span>
+        <span class="month-group-balance ${balance >= 0 ? 'positive' : 'negative'}">${formatBalance(balance)}</span>
+      </button>
+      <div class="month-group-body">
+        ${month.days.map(renderDayGroup).join('')}
+      </div>
+    </div>
+  `;
 }
 
 function renderDayGroup(group) {
@@ -1110,7 +1163,14 @@ function attachEventListeners() {
     const target = event.target.closest('[data-action]');
     if (!target) return;
     const action = target.dataset.action;
-    if (action === 'edit-day') {
+    if (action === 'toggle-month') {
+      const monthKey = target.dataset.month;
+      const group = target.closest('.month-group');
+      const nowExpanded = !expandedMonths.has(monthKey);
+      if (nowExpanded) expandedMonths.add(monthKey); else expandedMonths.delete(monthKey);
+      group.classList.toggle('is-expanded', nowExpanded);
+      target.setAttribute('aria-expanded', String(nowExpanded));
+    } else if (action === 'edit-day') {
       openDaySettingsDialog(target.dataset.date);
     } else if (action === 'edit-session') {
       openSessionEditDialog(target.dataset.id);

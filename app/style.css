@@ -457,6 +457,70 @@ body {
   padding: 2rem 0;
 }
 
+.month-group {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  margin-bottom: 0.9rem;
+  overflow: hidden;
+  animation: fadeSlideUp 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(min(var(--i, 0), 8) * 70ms);
+}
+
+.month-group-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 0.6rem;
+  padding: 0.85rem 1rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.month-chevron {
+  flex: none;
+  color: var(--text-muted);
+  transition: transform 200ms ease;
+}
+
+.month-group.is-expanded .month-chevron {
+  transform: rotate(90deg);
+}
+
+.month-group-title {
+  flex: 1;
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.month-group-balance {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.month-group-body {
+  display: none;
+}
+
+.month-group.is-expanded .month-group-body {
+  display: block;
+  padding-bottom: 0.4rem;
+}
+
+.month-group-body .day-group {
+  background: none;
+  border: none;
+  border-radius: 0;
+  margin-bottom: 0;
+  border-top: 1px solid var(--border);
+  animation: none;
+}
+
 .day-group {
   background: var(--bg-elevated);
   border: 1px solid var(--border);

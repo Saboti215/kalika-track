@@ -701,6 +701,21 @@ body {
   color: var(--text-muted);
 }
 
+.field-group-label {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.field-row {
+  display: flex;
+  gap: 0.6rem;
+}
+
+.field-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
 .field input {
   font-size: 1rem;
   padding: 0.7rem 0.8rem;

@@ -115,6 +115,30 @@ function parseHM(input) {
   return Math.round(hoursFloat * 60);
 }
 
+/** Fills a linked hours/minutes number-input pair from a minute total (or clears both if null). */
+function setHmInputs(hoursId, minutesId, totalMinutes) {
+  const hoursEl = document.getElementById(hoursId);
+  const minutesEl = document.getElementById(minutesId);
+  if (totalMinutes == null) {
+    hoursEl.value = '';
+    minutesEl.value = '';
+    return;
+  }
+  const minutes = Math.round(totalMinutes);
+  hoursEl.value = Math.floor(minutes / 60);
+  minutesEl.value = minutes % 60;
+}
+
+/** Reads a linked hours/minutes number-input pair back into a minute total, or null if both are empty. */
+function readHmInputs(hoursId, minutesId) {
+  const hoursValue = document.getElementById(hoursId).value;
+  const minutesValue = document.getElementById(minutesId).value;
+  if (hoursValue.trim() === '' && minutesValue.trim() === '') return null;
+  const hours = parseInt(hoursValue, 10) || 0;
+  const minutes = parseInt(minutesValue, 10) || 0;
+  return hours * 60 + minutes;
+}
+
 /** Formats minutes as "H:MM" (no sign), e.g. 480 -> "8:00". */
 function formatHM(totalMinutes) {
   const minutes = Math.round(totalMinutes);
@@ -255,6 +279,15 @@ function setDayMeta(dateKey, targetMinutes) {
 
 function addCompensation(dateKey, minutes, note) {
   state.compensations.push({ id: crypto.randomUUID(), date: dateKey, minutes, note: note || '' });
+  saveState();
+}
+
+function updateCompensation(compensationId, dateKey, minutes, note) {
+  const compensation = state.compensations.find((item) => item.id === compensationId);
+  if (!compensation) return;
+  compensation.date = dateKey;
+  compensation.minutes = minutes;
+  compensation.note = note || '';
   saveState();
 }
 
@@ -870,7 +903,7 @@ function renderCompensationRow(comp) {
         ${comp.note ? `<span class="entry-sub">${escapeHtml(comp.note)}</span>` : ''}
       </div>
       <span class="entry-duration">-${formatDurationHours(comp.minutes)}</span>
-      <button type="button" class="entry-edit-btn" data-action="delete-compensation" data-id="${comp.id}" aria-label="Ausgleich löschen">${ICON_DELETE}</button>
+      <button type="button" class="entry-edit-btn" data-action="edit-compensation" data-id="${comp.id}" aria-label="Ausgleich bearbeiten">${ICON_EDIT}</button>
     </div>
   `;
 }
@@ -900,6 +933,7 @@ function switchView(name) {
 
 const stopDialog = document.getElementById('stop-dialog');
 const compensationDialog = document.getElementById('compensation-dialog');
+const compensationEditDialog = document.getElementById('compensation-edit-dialog');
 const daySettingsDialog = document.getElementById('day-settings-dialog');
 const sessionEditDialog = document.getElementById('session-edit-dialog');
 const manualEntryDialog = document.getElementById('manual-entry-dialog');
@@ -912,6 +946,7 @@ const importConfirmBtn = document.getElementById('import-confirm-btn');
 const importCsvInput = document.getElementById('import-csv-input');
 
 let pendingStopSessionId = null;
+let pendingCompensationEditId = null;
 let pendingDayDateKey = null;
 let pendingSessionEditId = null;
 let pendingConfirmResolve = null;
@@ -937,7 +972,7 @@ function openStopDialog(sessionId) {
   const dateKey = toDateKey(new Date(session.start));
   const meta = getDayMeta(dateKey);
   document.getElementById('stop-break-minutes').value = state.settings.defaultBreakMinutes;
-  document.getElementById('stop-target-time').value = formatHM(meta.targetMinutes);
+  setHmInputs('stop-target-hours', 'stop-target-minutes', meta.targetMinutes);
   document.getElementById('stop-note').value = '';
   stopDialog.returnValue = '';
   stopDialog.showModal();
@@ -945,17 +980,28 @@ function openStopDialog(sessionId) {
 
 function openCompensationDialog() {
   document.getElementById('compensation-date').value = todayKey();
-  document.getElementById('compensation-time').value = '';
+  setHmInputs('compensation-hours', 'compensation-minutes', null);
   document.getElementById('compensation-note').value = '';
   compensationDialog.returnValue = '';
   compensationDialog.showModal();
+}
+
+function openCompensationEditDialog(compensationId) {
+  pendingCompensationEditId = compensationId;
+  const compensation = state.compensations.find((item) => item.id === compensationId);
+  if (!compensation) return;
+  document.getElementById('compensation-edit-date').value = compensation.date;
+  setHmInputs('compensation-edit-hours', 'compensation-edit-minutes', compensation.minutes);
+  document.getElementById('compensation-edit-note').value = compensation.note || '';
+  compensationEditDialog.returnValue = '';
+  compensationEditDialog.showModal();
 }
 
 function openDaySettingsDialog(dateKey) {
   pendingDayDateKey = dateKey;
   const meta = getDayMeta(dateKey);
   document.getElementById('day-settings-date').textContent = `(${formatDateHeading(dateKey)})`;
-  document.getElementById('day-target-time').value = formatHM(meta.targetMinutes);
+  setHmInputs('day-target-hours', 'day-target-minutes', meta.targetMinutes);
   daySettingsDialog.returnValue = '';
   daySettingsDialog.showModal();
 }
@@ -1062,8 +1108,7 @@ function attachEventListeners() {
   stopDialog.addEventListener('close', () => {
     if (stopDialog.returnValue !== 'confirm' || !pendingStopSessionId) return;
     const breakMinutes = parseInt(document.getElementById('stop-break-minutes').value, 10) || 0;
-    const targetMinutes =
-      parseHM(document.getElementById('stop-target-time').value) ?? state.settings.defaultTargetMinutes;
+    const targetMinutes = readHmInputs('stop-target-hours', 'stop-target-minutes') ?? state.settings.defaultTargetMinutes;
     const note = document.getElementById('stop-note').value.trim();
     stopSession(pendingStopSessionId, breakMinutes, targetMinutes, note);
     pendingStopSessionId = null;
@@ -1073,17 +1118,36 @@ function attachEventListeners() {
   compensationDialog.addEventListener('close', () => {
     if (compensationDialog.returnValue !== 'confirm') return;
     const dateKey = document.getElementById('compensation-date').value || todayKey();
-    const minutes = parseHM(document.getElementById('compensation-time').value);
+    const minutes = readHmInputs('compensation-hours', 'compensation-minutes');
     if (!minutes) return;
     const note = document.getElementById('compensation-note').value.trim();
     addCompensation(dateKey, minutes, note);
     renderAll();
   });
 
+  compensationEditDialog.addEventListener('close', async () => {
+    if (compensationEditDialog.returnValue === 'delete' && pendingCompensationEditId) {
+      const compensationIdToDelete = pendingCompensationEditId;
+      pendingCompensationEditId = null;
+      if (await showConfirmDialog('Ausgleichseintrag löschen?')) {
+        deleteCompensation(compensationIdToDelete);
+        renderAll();
+      }
+      return;
+    }
+    if (compensationEditDialog.returnValue !== 'confirm' || !pendingCompensationEditId) return;
+    const dateKey = document.getElementById('compensation-edit-date').value;
+    const minutes = readHmInputs('compensation-edit-hours', 'compensation-edit-minutes');
+    if (!dateKey || !minutes) return;
+    const note = document.getElementById('compensation-edit-note').value.trim();
+    updateCompensation(pendingCompensationEditId, dateKey, minutes, note);
+    pendingCompensationEditId = null;
+    renderAll();
+  });
+
   daySettingsDialog.addEventListener('close', () => {
     if (daySettingsDialog.returnValue !== 'confirm' || !pendingDayDateKey) return;
-    const targetMinutes =
-      parseHM(document.getElementById('day-target-time').value) ?? state.settings.defaultTargetMinutes;
+    const targetMinutes = readHmInputs('day-target-hours', 'day-target-minutes') ?? state.settings.defaultTargetMinutes;
     setDayMeta(pendingDayDateKey, targetMinutes);
     pendingDayDateKey = null;
     renderAll();
@@ -1174,11 +1238,8 @@ function attachEventListeners() {
       openDaySettingsDialog(target.dataset.date);
     } else if (action === 'edit-session') {
       openSessionEditDialog(target.dataset.id);
-    } else if (action === 'delete-compensation') {
-      if (await showConfirmDialog('Ausgleichseintrag löschen?')) {
-        deleteCompensation(target.dataset.id);
-        renderAll();
-      }
+    } else if (action === 'edit-compensation') {
+      openCompensationEditDialog(target.dataset.id);
     }
   }
   historyListEl.addEventListener('click', handleListClick);

@@ -111,10 +111,17 @@
         <span>Pause (Minuten)</span>
         <input type="number" id="stop-break-minutes" min="0" step="1" inputmode="numeric" required />
       </label>
-      <label class="field">
-        <span>Zielarbeitszeit heute (Stunden:Minuten)</span>
-        <input type="text" id="stop-target-time" placeholder="8:00" inputmode="numeric" required />
-      </label>
+      <span class="field-group-label">Zielarbeitszeit heute</span>
+      <div class="field-row">
+        <label class="field">
+          <span>Stunden</span>
+          <input type="number" id="stop-target-hours" min="0" step="1" inputmode="numeric" required />
+        </label>
+        <label class="field">
+          <span>Minuten</span>
+          <input type="number" id="stop-target-minutes" min="0" max="59" step="1" inputmode="numeric" />
+        </label>
+      </div>
       <label class="field">
         <span>Notiz (optional)</span>
         <input type="text" id="stop-note" placeholder="z. B. Projekt X" />
@@ -134,10 +141,17 @@
         <span>Datum</span>
         <input type="date" id="compensation-date" required />
       </label>
-      <label class="field">
-        <span>Zeit (Stunden:Minuten)</span>
-        <input type="text" id="compensation-time" placeholder="4:00" inputmode="numeric" required />
-      </label>
+      <span class="field-group-label">Zeit</span>
+      <div class="field-row">
+        <label class="field">
+          <span>Stunden</span>
+          <input type="number" id="compensation-hours" min="0" step="1" inputmode="numeric" required />
+        </label>
+        <label class="field">
+          <span>Minuten</span>
+          <input type="number" id="compensation-minutes" min="0" max="59" step="1" inputmode="numeric" />
+        </label>
+      </div>
       <label class="field">
         <span>Notiz (optional)</span>
         <input type="text" id="compensation-note" placeholder="z. B. früher gegangen" />
@@ -149,14 +163,54 @@
     </form>
   </dialog>
 
+  <!-- Dialog: edit an existing compensation entry -->
+  <dialog id="compensation-edit-dialog" class="app-dialog">
+    <form id="compensation-edit-form" method="dialog">
+      <h3>Ausgleich bearbeiten</h3>
+      <label class="field">
+        <span>Datum</span>
+        <input type="date" id="compensation-edit-date" required />
+      </label>
+      <span class="field-group-label">Zeit</span>
+      <div class="field-row">
+        <label class="field">
+          <span>Stunden</span>
+          <input type="number" id="compensation-edit-hours" min="0" step="1" inputmode="numeric" required />
+        </label>
+        <label class="field">
+          <span>Minuten</span>
+          <input type="number" id="compensation-edit-minutes" min="0" max="59" step="1" inputmode="numeric" />
+        </label>
+      </div>
+      <label class="field">
+        <span>Notiz (optional)</span>
+        <input type="text" id="compensation-edit-note" placeholder="z. B. früher gegangen" />
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-danger btn-icon" data-delete aria-label="Ausgleich löschen">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        </button>
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Dialog: edit a day's target time (break now lives per-session) -->
   <dialog id="day-settings-dialog" class="app-dialog">
     <form id="day-settings-form" method="dialog">
       <h3>Zielzeit <span id="day-settings-date"></span></h3>
-      <label class="field">
-        <span>Zielarbeitszeit (Stunden:Minuten)</span>
-        <input type="text" id="day-target-time" placeholder="8:00" inputmode="numeric" required />
-      </label>
+      <span class="field-group-label">Zielarbeitszeit</span>
+      <div class="field-row">
+        <label class="field">
+          <span>Stunden</span>
+          <input type="number" id="day-target-hours" min="0" step="1" inputmode="numeric" required />
+        </label>
+        <label class="field">
+          <span>Minuten</span>
+          <input type="number" id="day-target-minutes" min="0" max="59" step="1" inputmode="numeric" />
+        </label>
+      </div>
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
         <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>

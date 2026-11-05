@@ -28,8 +28,10 @@ kalika-track nutzt dieselben Bausteine wie kalika-whish: Supabase für Datenbank
 
 ## 3. Datenbank-Schema einspielen
 
-**Variante A – SQL Editor:** Dashboard → **SQL Editor** → **New query** → Inhalt von
-[`supabase/migrations/00001_initial_schema.sql`](../supabase/migrations/00001_initial_schema.sql) einfügen → **Run**.
+**Variante A – SQL Editor:** Dashboard → **SQL Editor** → **New query** → nacheinander den Inhalt jeder Datei
+aus [`supabase/migrations/`](../supabase/migrations/) einfügen → **Run**:
+[`00001_initial_schema.sql`](../supabase/migrations/00001_initial_schema.sql), dann
+[`00002_idempotent_import.sql`](../supabase/migrations/00002_idempotent_import.sql) (CSV-Import für den Offline-Modus).
 
 **Variante B – Supabase CLI:**
 
@@ -96,11 +98,24 @@ Der Import läuft in einer einzigen Transaktion (alles oder nichts). Er prüft n
 die Datei also nur **einmal** importieren. Eine gerade laufende Sitzung wird nicht exportiert;
 sie vorher in der alten App stoppen.
 
+## 8. Offline-Modus
+
+Die App speichert den letzten Stand und alle Änderungen lokal im Browser. Ohne Verbindung lässt sich
+normal weiterarbeiten; im Header steht dann z. B. „Offline · 2 Änderungen ausstehend“. Sobald wieder eine
+Verbindung besteht (bzw. die App wieder geöffnet wird), werden die Änderungen in der richtigen Reihenfolge
+hochgeladen und danach der Stand vom Server geholt.
+
+- Lehnt der Server eine Änderung ab (z. B. weil auf einem anderen Gerät bereits eine Sitzung läuft), wird sie
+  verworfen und ein Hinweis angezeigt.
+- Beim **Abmelden** werden die lokalen Daten vom Gerät gelöscht, auch noch nicht hochgeladene Änderungen
+  (die App warnt vorher).
+- Für den ersten Start ist eine Verbindung nötig (Anmeldung und erstes Laden der Daten).
+
 ## Fehlerbehebung
 
 | Problem | Ursache / Lösung |
 |---|---|
 | Weiße Seite, Konsole: „Missing VITE_SUPABASE_URL …“ | `.env` fehlt bzw. Image ohne Build-Args gebaut. |
-| „Speichern fehlgeschlagen“ / „Daten konnten nicht geladen werden“ | Schema (Schritt 3) fehlt oder keine Verbindung. |
+| Dauerhaft „Offline“ im Header, obwohl Internet da ist | Schema (Schritt 3) fehlt, Supabase nicht erreichbar oder falsche URL/Key in `.env`. |
 | Nach Google-Login falsche Seite / localhost:3000 | Redirect-URL in Schritt 5 fehlt. |
 | Google-Login: „redirect_uri_mismatch“ | Redirect-URI im Google-Client stimmt nicht mit `https://<ref>.supabase.co/auth/v1/callback` überein. |

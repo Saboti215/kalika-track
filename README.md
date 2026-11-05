@@ -14,6 +14,7 @@ per E-Mail/Passwort oder Google, so dass dieselben Daten auf allen Geräten verf
 - Tage ohne Zeiterfassung wirken sich nicht negativ auf den Saldo aus
 - Historie gruppiert nach Monat und Tag
 - CSV-Export und -Import (Backup, Umzug aus der alten localStorage-Version)
+- Offline-Modus: Änderungen werden lokal zwischengespeichert und bei der nächsten Verbindung hochgeladen
 - Installierbar auf dem iPhone-Homescreen
 
 ## Setup

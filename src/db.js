@@ -5,7 +5,8 @@
      days:          { [dateKey]: { targetMinutes } }
      compensations: { id, date: dateKey, minutes, note }
      settings:      { defaultTargetMinutes, defaultBreakMinutes, lastExportAt, backupReminderSnoozedUntil }
-   Every function throws on a database error.
+   Every function throws on a database error. Writes are idempotent (ids are
+   generated on the client), so the offline outbox can safely retry them.
    ========================================================================== */
 
 import { supabase } from './supabase.js';
@@ -25,8 +26,12 @@ export const DEFAULT_SETTINGS = {
   backupReminderSnoozedUntil: null,
 };
 
-function unwrap({ data, error }) {
-  if (error) throw error;
+function unwrap({ data, error, status }) {
+  if (error) {
+    // status 0 = the request never reached the server (offline).
+    error.status = status;
+    throw error;
+  }
   return data;
 }
 
@@ -93,29 +98,32 @@ export async function fetchState() {
   };
 }
 
-/* ---------- Sessions ---------- */
-
-export async function insertSession({ start, end, breakMinutes, note }) {
-  const row = unwrap(
-    await supabase
-      .from(SESSIONS)
-      .insert({ start_at: start, end_at: end, break_minutes: breakMinutes, note: note || '' })
-      .select(SESSION_COLUMNS)
-      .single()
-  );
-  return toSession(row);
+function sessionRow(session) {
+  return {
+    id: session.id,
+    start_at: session.start,
+    end_at: session.end,
+    break_minutes: session.breakMinutes,
+    note: session.note || '',
+  };
 }
 
-export async function updateSession(id, { start, end, breakMinutes, note }) {
-  const row = unwrap(
-    await supabase
-      .from(SESSIONS)
-      .update({ start_at: start, end_at: end, break_minutes: breakMinutes, note: note || '' })
-      .eq('id', id)
-      .select(SESSION_COLUMNS)
-      .single()
-  );
-  return toSession(row);
+function compensationRow(compensation) {
+  return { id: compensation.id, day: compensation.date, minutes: compensation.minutes, note: compensation.note || '' };
+}
+
+// Inserts skip rows that already exist, so a retried insert is a no-op.
+const INSERT_ONCE = { onConflict: 'id', ignoreDuplicates: true };
+
+/* ---------- Sessions ---------- */
+
+export async function insertSession(session) {
+  unwrap(await supabase.from(SESSIONS).upsert(sessionRow(session), INSERT_ONCE));
+}
+
+export async function updateSession(session) {
+  const { id, ...changes } = sessionRow(session);
+  unwrap(await supabase.from(SESSIONS).update(changes).eq('id', id));
 }
 
 export async function deleteSession(id) {
@@ -132,27 +140,13 @@ export async function upsertDay(dateKey, targetMinutes) {
 
 /* ---------- Compensations ---------- */
 
-export async function insertCompensation({ date, minutes, note }) {
-  const row = unwrap(
-    await supabase
-      .from(COMPENSATIONS)
-      .insert({ day: date, minutes, note: note || '' })
-      .select(COMPENSATION_COLUMNS)
-      .single()
-  );
-  return toCompensation(row);
+export async function insertCompensation(compensation) {
+  unwrap(await supabase.from(COMPENSATIONS).upsert(compensationRow(compensation), INSERT_ONCE));
 }
 
-export async function updateCompensation(id, { date, minutes, note }) {
-  const row = unwrap(
-    await supabase
-      .from(COMPENSATIONS)
-      .update({ day: date, minutes, note: note || '' })
-      .eq('id', id)
-      .select(COMPENSATION_COLUMNS)
-      .single()
-  );
-  return toCompensation(row);
+export async function updateCompensation(compensation) {
+  const { id, ...changes } = compensationRow(compensation);
+  unwrap(await supabase.from(COMPENSATIONS).update(changes).eq('id', id));
 }
 
 export async function deleteCompensation(id) {
@@ -173,19 +167,14 @@ export async function saveSettings(userId, settings) {
   );
 }
 
-/* ---------- CSV import (one transaction via RPC) ---------- */
+/* ---------- CSV import (one transaction via RPC, see migration 00002) ---------- */
 
-export async function importEntries(sessions, compensations, dayTargets) {
+export async function importEntries({ sessions, compensations, days }) {
   unwrap(
     await supabase.rpc('kalika_track_import', {
-      p_sessions: sessions.map((s) => ({
-        start_at: s.startIso,
-        end_at: s.endIso,
-        break_minutes: s.breakMinutes,
-        note: s.note || '',
-      })),
-      p_compensations: compensations.map((c) => ({ day: c.date, minutes: c.minutes, note: c.note || '' })),
-      p_days: Object.entries(dayTargets).map(([day, targetMinutes]) => ({ day, target_minutes: targetMinutes })),
+      p_sessions: sessions.map(sessionRow),
+      p_compensations: compensations.map(compensationRow),
+      p_days: Object.entries(days).map(([day, targetMinutes]) => ({ day, target_minutes: targetMinutes })),
     })
   );
 }

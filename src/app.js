@@ -1,15 +1,17 @@
 /* ==========================================================================
    kalika-track - application logic
-   Time tracking with flextime/overtime calculation. All data lives in
-   Supabase (see db.js); `state` is an in-memory copy of the signed-in
-   user's rows that every render reads from.
+   Time tracking with flextime/overtime calculation. Data is kept in
+   Supabase and mirrored locally (see store.js), so the app also works
+   offline and uploads changes on the next connection.
    ========================================================================== */
 
 import './style.css';
-import * as db from './db.js';
+import * as store from './store.js';
+import { state } from './store.js';
 import {
   initAuth,
-  onSessionChange,
+  onUserChange,
+  rememberUser,
   signupEnabled,
   signInWithPassword,
   signUp,
@@ -18,21 +20,7 @@ import {
   translateAuthError,
 } from './auth.js';
 
-/* --------------------------------------------------------------------------
-   State
-   -------------------------------------------------------------------------- */
-
-function createEmptyState() {
-  return {
-    sessions: [], // { id, start: ISO string, end: ISO string|null, breakMinutes, note }
-    days: {}, // dateKey -> { targetMinutes }
-    compensations: [], // { id, date: dateKey, minutes, note }
-    settings: { ...db.DEFAULT_SETTINGS },
-  };
-}
-
-let state = createEmptyState();
-// undefined = not resolved yet; null = signed out. Distinct so the first null session still shows the login.
+// undefined = not resolved yet; null = signed out. Distinct so the first null still shows the login.
 let currentUserId = undefined;
 
 /* --------------------------------------------------------------------------
@@ -175,45 +163,43 @@ function getRunningSession() {
   return state.sessions.find((session) => session.end === null) || null;
 }
 
-/* All mutations write to Supabase first and only then update local state,
-   so the UI never shows data that wasn't actually saved. */
+/* Mutations update the local state immediately and queue the change for
+   upload (store.commit), so they work the same online and offline. */
 
-async function startSession() {
-  const session = await db.insertSession({ start: new Date().toISOString(), end: null, breakMinutes: 0, note: '' });
-  state.sessions.push(session);
+function startSession() {
+  if (getRunningSession()) return; // guard against a double tap
+  store.commit({
+    type: 'session.insert',
+    session: { id: crypto.randomUUID(), start: new Date().toISOString(), end: null, breakMinutes: 0, note: '' },
+  });
 }
 
-async function stopSession(sessionId, breakMinutes, targetMinutes, note) {
+function stopSession(sessionId, breakMinutes, targetMinutes, note) {
   const session = state.sessions.find((item) => item.id === sessionId);
   if (!session) return;
-  const updated = await db.updateSession(sessionId, {
-    start: session.start,
-    end: new Date().toISOString(),
-    breakMinutes,
-    note,
+  store.commit(
+    { type: 'session.update', session: { ...session, end: new Date().toISOString(), breakMinutes, note: note || '' } },
+    { type: 'day.set', date: toDateKey(new Date(session.start)), targetMinutes }
+  );
+}
+
+function updateSession(sessionId, startIso, endIso, breakMinutes, note) {
+  store.commit({
+    type: 'session.update',
+    session: { id: sessionId, start: startIso, end: endIso, breakMinutes, note: note || '' },
   });
-  replaceSession(updated);
-  await setDayMeta(toDateKey(new Date(updated.start)), targetMinutes);
-}
-
-async function updateSession(sessionId, startIso, endIso, breakMinutes, note) {
-  const updated = await db.updateSession(sessionId, { start: startIso, end: endIso, breakMinutes, note });
-  replaceSession(updated);
-}
-
-function replaceSession(updated) {
-  state.sessions = state.sessions.map((item) => (item.id === updated.id ? updated : item));
 }
 
 /** Adds a completed session entered retroactively (Historie -> "Eintrag hinzufügen"). */
-async function addManualSession(startIso, endIso, breakMinutes, note) {
-  const session = await db.insertSession({ start: startIso, end: endIso, breakMinutes, note });
-  state.sessions.push(session);
+function addManualSession(startIso, endIso, breakMinutes, note) {
+  store.commit({
+    type: 'session.insert',
+    session: { id: crypto.randomUUID(), start: startIso, end: endIso, breakMinutes, note: note || '' },
+  });
 }
 
-async function deleteSession(sessionId) {
-  await db.deleteSession(sessionId);
-  state.sessions = state.sessions.filter((item) => item.id !== sessionId);
+function deleteSession(sessionId) {
+  store.commit({ type: 'session.delete', id: sessionId });
 }
 
 function getDayMeta(dateKey) {
@@ -221,30 +207,30 @@ function getDayMeta(dateKey) {
   return { targetMinutes: override?.targetMinutes ?? state.settings.defaultTargetMinutes };
 }
 
-async function setDayMeta(dateKey, targetMinutes) {
-  await db.upsertDay(dateKey, targetMinutes);
-  state.days[dateKey] = { targetMinutes };
+function setDayMeta(dateKey, targetMinutes) {
+  store.commit({ type: 'day.set', date: dateKey, targetMinutes });
 }
 
-async function addCompensation(dateKey, minutes, note) {
-  const compensation = await db.insertCompensation({ date: dateKey, minutes, note });
-  state.compensations.push(compensation);
+function addCompensation(dateKey, minutes, note) {
+  store.commit({
+    type: 'compensation.insert',
+    compensation: { id: crypto.randomUUID(), date: dateKey, minutes, note: note || '' },
+  });
 }
 
-async function updateCompensation(compensationId, dateKey, minutes, note) {
-  const updated = await db.updateCompensation(compensationId, { date: dateKey, minutes, note });
-  state.compensations = state.compensations.map((item) => (item.id === updated.id ? updated : item));
+function updateCompensation(compensationId, dateKey, minutes, note) {
+  store.commit({
+    type: 'compensation.update',
+    compensation: { id: compensationId, date: dateKey, minutes, note: note || '' },
+  });
 }
 
-async function deleteCompensation(compensationId) {
-  await db.deleteCompensation(compensationId);
-  state.compensations = state.compensations.filter((item) => item.id !== compensationId);
+function deleteCompensation(compensationId) {
+  store.commit({ type: 'compensation.delete', id: compensationId });
 }
 
-async function updateSettings(changes) {
-  const next = { ...state.settings, ...changes };
-  await db.saveSettings(currentUserId, next);
-  state.settings = next;
+function updateSettings(changes) {
+  store.commit({ type: 'settings.set', settings: { ...state.settings, ...changes } });
 }
 
 /* --------------------------------------------------------------------------
@@ -433,7 +419,7 @@ async function exportEntriesAsCsv() {
   const outcome = await tryShareCsv(filename, csvContent);
   if (outcome === 'cancelled') return; // user actively declined; don't force a download too
   if (outcome === 'unsupported') downloadTextFile(filename, csvContent, 'text/csv;charset=utf-8;');
-  await runMutation(() => updateSettings({ lastExportAt: new Date().toISOString() }));
+  updateSettings({ lastExportAt: new Date().toISOString() });
 }
 
 function detectCsvDelimiter(text) {
@@ -574,10 +560,25 @@ function parseImportCsv(text) {
   return { sessions, compensations, dayTargets, errors };
 }
 
-/** Saves parsed import results in one transaction, then reloads everything from the server. */
-async function applyImportedEntries(sessions, compensations, dayTargets) {
-  await db.importEntries(sessions, compensations, dayTargets);
-  state = await db.fetchState();
+/** Queues parsed import results as one operation (one transaction on the server). */
+function applyImportedEntries(sessions, compensations, dayTargets) {
+  store.commit({
+    type: 'import',
+    sessions: sessions.map((session) => ({
+      id: crypto.randomUUID(),
+      start: session.startIso,
+      end: session.endIso,
+      breakMinutes: session.breakMinutes,
+      note: session.note || '',
+    })),
+    compensations: compensations.map((comp) => ({
+      id: crypto.randomUUID(),
+      date: comp.date,
+      minutes: comp.minutes,
+      note: comp.note || '',
+    })),
+    days: { ...dayTargets },
+  });
 }
 
 /* --------------------------------------------------------------------------
@@ -999,7 +1000,7 @@ function attachEventListeners() {
     if (running) {
       openStopDialog(running.id);
     } else {
-      runMutation(startSession);
+      startSession();
     }
   });
 
@@ -1021,7 +1022,7 @@ function attachEventListeners() {
   backupReminderDismissBtn.addEventListener('click', () => {
     const snoozeUntil = new Date();
     snoozeUntil.setDate(snoozeUntil.getDate() + BACKUP_REMINDER_SNOOZE_DAYS);
-    runMutation(() => updateSettings({ backupReminderSnoozedUntil: snoozeUntil.toISOString() }));
+    updateSettings({ backupReminderSnoozedUntil: snoozeUntil.toISOString() });
   });
 
   tabButtons.forEach((btn) => {
@@ -1043,7 +1044,7 @@ function attachEventListeners() {
     const note = document.getElementById('stop-note').value.trim();
     const sessionId = pendingStopSessionId;
     pendingStopSessionId = null;
-    runMutation(() => stopSession(sessionId, breakMinutes, targetMinutes, note));
+    stopSession(sessionId, breakMinutes, targetMinutes, note);
   });
 
   compensationDialog.addEventListener('close', () => {
@@ -1052,7 +1053,7 @@ function attachEventListeners() {
     const minutes = readHmInputs('compensation-hours', 'compensation-minutes');
     if (!minutes) return;
     const note = document.getElementById('compensation-note').value.trim();
-    runMutation(() => addCompensation(dateKey, minutes, note));
+    addCompensation(dateKey, minutes, note);
   });
 
   compensationEditDialog.addEventListener('close', async () => {
@@ -1060,7 +1061,7 @@ function attachEventListeners() {
       const compensationIdToDelete = pendingCompensationEditId;
       pendingCompensationEditId = null;
       if (await showConfirmDialog('Ausgleichseintrag löschen?')) {
-        await runMutation(() => deleteCompensation(compensationIdToDelete));
+        deleteCompensation(compensationIdToDelete);
       }
       return;
     }
@@ -1071,7 +1072,7 @@ function attachEventListeners() {
     const note = document.getElementById('compensation-edit-note').value.trim();
     const compensationId = pendingCompensationEditId;
     pendingCompensationEditId = null;
-    runMutation(() => updateCompensation(compensationId, dateKey, minutes, note));
+    updateCompensation(compensationId, dateKey, minutes, note);
   });
 
   daySettingsDialog.addEventListener('close', () => {
@@ -1079,7 +1080,7 @@ function attachEventListeners() {
     const targetMinutes = readHmInputs('day-target-hours', 'day-target-minutes') ?? state.settings.defaultTargetMinutes;
     const dateKey = pendingDayDateKey;
     pendingDayDateKey = null;
-    runMutation(() => setDayMeta(dateKey, targetMinutes));
+    setDayMeta(dateKey, targetMinutes);
   });
 
   sessionEditDialog.addEventListener('close', async () => {
@@ -1087,7 +1088,7 @@ function attachEventListeners() {
       const sessionIdToDelete = pendingSessionEditId;
       pendingSessionEditId = null;
       if (await showConfirmDialog('Diese Sitzung wirklich löschen?')) {
-        await runMutation(() => deleteSession(sessionIdToDelete));
+        deleteSession(sessionIdToDelete);
       }
       return;
     }
@@ -1115,7 +1116,7 @@ function attachEventListeners() {
     const note = document.getElementById('session-edit-note').value.trim();
     const sessionId = pendingSessionEditId;
     pendingSessionEditId = null;
-    runMutation(() => updateSession(sessionId, startDate.toISOString(), endDate ? endDate.toISOString() : null, breakMinutes, note));
+    updateSession(sessionId, startDate.toISOString(), endDate ? endDate.toISOString() : null, breakMinutes, note);
   });
 
   manualEntryDialog.addEventListener('close', () => {
@@ -1132,7 +1133,7 @@ function attachEventListeners() {
 
     const breakMinutes = parseInt(document.getElementById('manual-entry-break').value, 10) || 0;
     const note = document.getElementById('manual-entry-note').value.trim();
-    runMutation(() => addManualSession(startDate.toISOString(), endDate.toISOString(), breakMinutes, note));
+    addManualSession(startDate.toISOString(), endDate.toISOString(), breakMinutes, note);
   });
 
   confirmDialog.addEventListener('close', () => {
@@ -1145,7 +1146,7 @@ function attachEventListeners() {
     const result = pendingImportResult;
     pendingImportResult = null;
     if (importDialog.returnValue !== 'confirm' || !result) return;
-    runMutation(() => applyImportedEntries(result.sessions, result.compensations, result.dayTargets));
+    applyImportedEntries(result.sessions, result.compensations, result.dayTargets);
   });
 
   // Event delegation for dynamically rendered entry rows, shared by both lists.
@@ -1283,12 +1284,12 @@ function initHeaderNetworkAnimation() {
 }
 
 /* --------------------------------------------------------------------------
-   Saving + error feedback
+   Sync status + error feedback
    -------------------------------------------------------------------------- */
 
 const toastEl = document.getElementById('toast');
+const syncStatusEl = document.getElementById('sync-status');
 let toastTimeout = null;
-let mutationInFlight = false;
 
 function showToast(message) {
   toastEl.textContent = message;
@@ -1296,50 +1297,31 @@ function showToast(message) {
   clearTimeout(toastTimeout);
   toastTimeout = setTimeout(() => {
     toastEl.hidden = true;
-  }, 5000);
+  }, 6000);
 }
 
-function describeSaveError(error) {
-  // 23505 on the "one running session" index: a session was started elsewhere meanwhile.
-  if (error?.code === '23505') return 'Es läuft bereits eine Sitzung (evtl. auf einem anderen Gerät).';
-  if (error?.code === '23514') return 'Ungültige Eingabe, bitte prüfen (z. B. Ende vor Start).';
-  if (!navigator.onLine) return 'Keine Internetverbindung. Änderung wurde nicht gespeichert.';
-  return 'Speichern fehlgeschlagen. Bitte erneut versuchen.';
+function pendingLabel(count) {
+  return `${count} ${count === 1 ? 'Änderung' : 'Änderungen'} ausstehend`;
 }
 
-/**
- * Runs a state mutation (which writes to Supabase), then re-renders.
- * Ignores taps while another save is still running, so a double tap on
- * "Start" can't create two sessions. On failure the state is reloaded from
- * the server so the UI never drifts from what's actually stored.
- */
-async function runMutation(mutation) {
-  if (mutationInFlight) return;
-  mutationInFlight = true;
-  document.body.classList.add('is-saving');
-  try {
-    await mutation();
-  } catch (error) {
-    console.error('kalika-track: saving failed.', error);
-    showToast(describeSaveError(error));
-    await reloadState();
-  } finally {
-    mutationInFlight = false;
-    document.body.classList.remove('is-saving');
-    renderAll();
-  }
+/** Small pill in the header: hidden while everything is synced. */
+function renderSyncStatus() {
+  const { pending, offline } = store.getStatus();
+  let text = '';
+  if (offline) text = pending > 0 ? `Offline · ${pendingLabel(pending)}` : 'Offline';
+  else if (pending > 0) text = 'Wird synchronisiert …';
+  syncStatusEl.textContent = text;
+  syncStatusEl.hidden = !text;
+  syncStatusEl.classList.toggle('is-offline', offline);
 }
 
-/** Re-fetches everything from Supabase. Keeps the current state if that fails (e.g. offline). */
-async function reloadState() {
-  if (!currentUserId) return;
-  try {
-    state = await db.fetchState();
-  } catch (error) {
-    console.error('kalika-track: loading data failed.', error);
-    showToast('Daten konnten nicht geladen werden. Bitte Verbindung prüfen.');
-  }
-}
+store.subscribe({
+  onChange(dataChanged) {
+    if (dataChanged) renderAll();
+    renderSyncStatus();
+  },
+  onError: showToast,
+});
 
 /* --------------------------------------------------------------------------
    Login screen + session handling
@@ -1395,28 +1377,37 @@ function showScreen(name) {
 }
 
 /** Switches the UI to whoever is signed in now (or to the login screen). */
-async function handleSession(session) {
-  const userId = session?.user?.id ?? null;
+async function handleUser(user) {
+  const userId = user?.id ?? null;
   if (userId === currentUserId) return; // token refresh etc., nothing changed
 
   currentUserId = userId;
-  state = createEmptyState();
   lastGlobalBalanceMinutes = null;
   lastTodayBalanceMinutes = null;
+  const hasCache = store.setUser(userId);
 
   if (!userId) {
     renderAll();
+    renderSyncStatus();
     setLoginMessage();
     loginPasswordEl.value = '';
     showScreen('login');
     return;
   }
 
-  showScreen('loading');
-  await reloadState();
-  if (currentUserId !== userId) return; // signed out while loading
-  document.getElementById('account-email').textContent = session.user.email ?? '';
+  rememberUser(user);
+  document.getElementById('account-email').textContent = user.email ?? '';
+
+  // With a local copy the app is usable right away (also offline); otherwise wait for the first load.
+  if (!hasCache) {
+    showScreen('loading');
+    await store.sync();
+    if (currentUserId !== userId) return; // signed out while loading
+  } else {
+    store.sync();
+  }
   renderAll();
+  renderSyncStatus();
   showScreen('app');
 }
 
@@ -1461,17 +1452,23 @@ function attachLoginListeners() {
   });
 
   document.getElementById('logout-btn').addEventListener('click', async () => {
-    if (await showConfirmDialog('Möchtest du dich abmelden?', { title: 'Abmelden', confirmLabel: 'Abmelden' })) {
-      await signOut();
-    }
+    const { pending } = store.getStatus();
+    const message =
+      pending > 0
+        ? `Es gibt noch ${pendingLabel(pending)}, die nicht hochgeladen wurden. Beim Abmelden gehen sie verloren.`
+        : 'Möchtest du dich abmelden?';
+    if (!(await showConfirmDialog(message, { title: 'Abmelden', confirmLabel: 'Abmelden' }))) return;
+    // Explicit logout removes this user's data from the device. Switch away first so a
+    // sync that's still running can't write the cache back.
+    const userId = currentUserId;
+    handleUser(null); // also covers offline, where Supabase may not emit SIGNED_OUT
+    store.forgetUser(userId);
+    await signOut();
   });
 
   // Data may have changed on another device while the app was in the background.
-  document.addEventListener('visibilitychange', async () => {
-    if (document.hidden || !currentUserId || mutationInFlight) return;
-    if (document.querySelector('dialog[open]')) return;
-    await reloadState();
-    renderAll();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && currentUserId) store.sync();
   });
 }
 
@@ -1498,7 +1495,7 @@ attachLoginListeners();
 renderLoginMode();
 registerServiceWorker();
 
-initAuth().then(async (session) => {
-  await handleSession(session);
-  onSessionChange(handleSession);
+initAuth().then(async (user) => {
+  await handleUser(user);
+  onUserChange(handleUser);
 });

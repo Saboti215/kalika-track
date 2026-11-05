@@ -117,11 +117,243 @@ html, body {
 
 body {
   padding-top: env(safe-area-inset-top);
-  padding-bottom: calc(var(--tab-bar-height) + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
   padding-left: env(safe-area-inset-left);
   padding-right: env(safe-area-inset-right);
   display: flex;
   flex-direction: column;
+}
+
+/* Room for the fixed tab bar, only while the app (not the login screen) is shown. */
+body.has-tab-bar {
+  padding-bottom: calc(var(--tab-bar-height) + env(safe-area-inset-bottom));
+}
+
+/* The wrapper must not break the body's flex column layout of header/views. */
+#app-shell {
+  display: contents;
+}
+
+#app-shell[hidden] {
+  display: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- Loading screen ---------- */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-screen {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+}
+
+.loading-screen[hidden] {
+  display: none;
+}
+
+.loading-spinner {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: spin 800ms linear infinite;
+}
+
+/* ---------- Login screen ---------- */
+
+.login-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem 1rem;
+}
+
+.login-screen[hidden] {
+  display: none;
+}
+
+.login-card {
+  width: min(100%, 24rem);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  padding: 1.75rem 1.5rem;
+  box-shadow: 0 12px 32px var(--shadow);
+  text-align: center;
+  animation: fadeSlideUp 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.login-icon {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 0.9rem;
+}
+
+.login-title {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 1.4rem;
+  letter-spacing: -0.01em;
+}
+
+.login-subtitle {
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.btn-google {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  text-align: left;
+}
+
+.login-form .btn {
+  margin-top: 0.25rem;
+}
+
+.login-error,
+.login-info {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.login-error {
+  color: var(--negative);
+}
+
+.login-info {
+  color: var(--positive);
+}
+
+.login-toggle {
+  margin: 1.25rem 0 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.login-toggle-btn {
+  background: none;
+  border: none;
+  padding: 0.5rem 0.25rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.private-notice {
+  max-width: 24rem;
+  margin: 1.25rem 0 0;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* ---------- Account row (Historie) + toast ---------- */
+
+.account-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.account-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.account-email {
+  color: var(--text);
+}
+
+/* Header pill showing offline state / pending uploads. */
+.sync-status {
+  display: inline-block;
+  margin: -0.35rem 0 0.6rem;
+  padding: 0.2rem 0.65rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.sync-status.is-offline {
+  background: rgba(255, 180, 168, 0.22);
+  color: #ffd9d2;
+}
+
+.sync-status[hidden] {
+  display: none;
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--tab-bar-height) + env(safe-area-inset-bottom) + 0.75rem);
+  transform: translateX(-50%);
+  z-index: 20;
+  width: min(92vw, 26rem);
+  padding: 0.8rem 1rem;
+  border-radius: 0.9rem;
+  background: var(--negative);
+  color: #fff;
+  font-size: 0.9rem;
+  box-shadow: 0 10px 30px var(--shadow);
+  animation: fadeSlideUp 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.toast[hidden] {
+  display: none;
 }
 
 /* ---------- Header ---------- */
@@ -790,7 +1022,8 @@ body {
 }
 
 @media (prefers-color-scheme: dark) {
-  .tab-btn.is-active {
+  .tab-btn.is-active,
+  .login-toggle-btn {
     color: var(--accent-light);
   }
 }

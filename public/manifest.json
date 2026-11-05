@@ -1,8 +1,8 @@
 {
   "name": "kalika-track",
   "short_name": "kalika-track",
-  "description": "Offline-fähige Zeiterfassung mit Überstundenkonto",
-  "start_url": "./index.html",
+  "description": "Zeiterfassung mit Überstundenkonto",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

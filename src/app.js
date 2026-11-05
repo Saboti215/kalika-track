@@ -1,94 +1,39 @@
-'use strict';
-
 /* ==========================================================================
    kalika-track - application logic
-   Fully client-side time tracking with flextime/overtime calculation.
-   All persistence happens via localStorage, no backend involved.
+   Time tracking with flextime/overtime calculation. All data lives in
+   Supabase (see db.js); `state` is an in-memory copy of the signed-in
+   user's rows that every render reads from.
    ========================================================================== */
 
-const STORAGE_KEY = 'kalika-track.v1';
+import './style.css';
+import * as db from './db.js';
+import {
+  initAuth,
+  onSessionChange,
+  signupEnabled,
+  signInWithPassword,
+  signUp,
+  signInWithGoogle,
+  signOut,
+  translateAuthError,
+} from './auth.js';
 
 /* --------------------------------------------------------------------------
-   Storage
+   State
    -------------------------------------------------------------------------- */
 
-function createDefaultState() {
+function createEmptyState() {
   return {
-    version: 2,
     sessions: [], // { id, start: ISO string, end: ISO string|null, breakMinutes, note }
     days: {}, // dateKey -> { targetMinutes }
     compensations: [], // { id, date: dateKey, minutes, note }
-    settings: { defaultTargetMinutes: 480, defaultBreakMinutes: 30, lastExportAt: null, backupReminderSnoozedUntil: null },
+    settings: { ...db.DEFAULT_SETTINGS },
   };
 }
 
-/**
- * Migrates v1 data (break stored per day) to v2 (break stored per session).
- * Each day's stored break is assigned to that day's earliest completed
- * session; every other session on that day gets no break (0), since there
- * is no way to know how the day's single break was actually distributed.
- */
-function migrateDayBreaksToSessions(sessions, days) {
-  const sessionsByDate = new Map();
-  sessions.forEach((session) => {
-    if (session.end === null) return;
-    const dateKey = toDateKey(new Date(session.start));
-    if (!sessionsByDate.has(dateKey)) sessionsByDate.set(dateKey, []);
-    sessionsByDate.get(dateKey).push(session);
-  });
-  sessionsByDate.forEach((daySessions, dateKey) => {
-    const legacyBreak = days[dateKey]?.breakMinutes;
-    if (legacyBreak == null) return;
-    daySessions.sort((a, b) => new Date(a.start) - new Date(b.start));
-    daySessions[0].breakMinutes = legacyBreak;
-  });
-}
-
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return createDefaultState();
-    const parsed = JSON.parse(raw);
-
-    const sessions = Array.isArray(parsed.sessions) ? parsed.sessions.map((s) => ({ ...s })) : [];
-    const legacyDays = parsed.days && typeof parsed.days === 'object' ? parsed.days : {};
-    const compensations = Array.isArray(parsed.compensations) ? parsed.compensations : [];
-    const settings = {
-      defaultTargetMinutes: parsed.settings?.defaultTargetMinutes ?? 480,
-      defaultBreakMinutes: parsed.settings?.defaultBreakMinutes ?? 30,
-      lastExportAt: parsed.settings?.lastExportAt ?? null,
-      backupReminderSnoozedUntil: parsed.settings?.backupReminderSnoozedUntil ?? null,
-    };
-
-    if ((parsed.version ?? 1) < 2) {
-      migrateDayBreaksToSessions(sessions, legacyDays);
-    }
-
-    // Every session must have a breakMinutes and note field from here on.
-    sessions.forEach((session) => {
-      if (typeof session.breakMinutes !== 'number') session.breakMinutes = 0;
-      if (typeof session.note !== 'string') session.note = '';
-    });
-
-    // Day meta is target-only as of v2 (break now lives on the session).
-    const days = {};
-    Object.keys(legacyDays).forEach((dateKey) => {
-      days[dateKey] = { targetMinutes: legacyDays[dateKey]?.targetMinutes ?? settings.defaultTargetMinutes };
-    });
-
-    return { version: 2, sessions, days, compensations, settings };
-  } catch (error) {
-    console.error('kalika-track: failed to load state, starting fresh.', error);
-    return createDefaultState();
-  }
-}
-
-function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-}
-
-let state = loadState();
-saveState(); // persist the migrated shape immediately so it only ever runs once
+let state = createEmptyState();
+// undefined = not resolved yet; null = signed out. Distinct so the first null session still shows the login.
+let currentUserId = undefined;
 
 /* --------------------------------------------------------------------------
    Formatting helpers (time, dates)
@@ -230,41 +175,45 @@ function getRunningSession() {
   return state.sessions.find((session) => session.end === null) || null;
 }
 
-function startSession() {
-  state.sessions.push({ id: crypto.randomUUID(), start: new Date().toISOString(), end: null, breakMinutes: 0, note: '' });
-  saveState();
+/* All mutations write to Supabase first and only then update local state,
+   so the UI never shows data that wasn't actually saved. */
+
+async function startSession() {
+  const session = await db.insertSession({ start: new Date().toISOString(), end: null, breakMinutes: 0, note: '' });
+  state.sessions.push(session);
 }
 
-function stopSession(sessionId, breakMinutes, targetMinutes, note) {
+async function stopSession(sessionId, breakMinutes, targetMinutes, note) {
   const session = state.sessions.find((item) => item.id === sessionId);
   if (!session) return;
-  session.end = new Date().toISOString();
-  session.breakMinutes = breakMinutes;
-  session.note = note || '';
-  const dateKey = toDateKey(new Date(session.start));
-  state.days[dateKey] = { targetMinutes };
-  saveState();
+  const updated = await db.updateSession(sessionId, {
+    start: session.start,
+    end: new Date().toISOString(),
+    breakMinutes,
+    note,
+  });
+  replaceSession(updated);
+  await setDayMeta(toDateKey(new Date(updated.start)), targetMinutes);
 }
 
-function updateSession(sessionId, startIso, endIso, breakMinutes, note) {
-  const session = state.sessions.find((item) => item.id === sessionId);
-  if (!session) return;
-  session.start = startIso;
-  session.end = endIso;
-  session.breakMinutes = breakMinutes;
-  session.note = note || '';
-  saveState();
+async function updateSession(sessionId, startIso, endIso, breakMinutes, note) {
+  const updated = await db.updateSession(sessionId, { start: startIso, end: endIso, breakMinutes, note });
+  replaceSession(updated);
+}
+
+function replaceSession(updated) {
+  state.sessions = state.sessions.map((item) => (item.id === updated.id ? updated : item));
 }
 
 /** Adds a completed session entered retroactively (Historie -> "Eintrag hinzufügen"). */
-function addManualSession(startIso, endIso, breakMinutes, note) {
-  state.sessions.push({ id: crypto.randomUUID(), start: startIso, end: endIso, breakMinutes, note: note || '' });
-  saveState();
+async function addManualSession(startIso, endIso, breakMinutes, note) {
+  const session = await db.insertSession({ start: startIso, end: endIso, breakMinutes, note });
+  state.sessions.push(session);
 }
 
-function deleteSession(sessionId) {
+async function deleteSession(sessionId) {
+  await db.deleteSession(sessionId);
   state.sessions = state.sessions.filter((item) => item.id !== sessionId);
-  saveState();
 }
 
 function getDayMeta(dateKey) {
@@ -272,28 +221,30 @@ function getDayMeta(dateKey) {
   return { targetMinutes: override?.targetMinutes ?? state.settings.defaultTargetMinutes };
 }
 
-function setDayMeta(dateKey, targetMinutes) {
+async function setDayMeta(dateKey, targetMinutes) {
+  await db.upsertDay(dateKey, targetMinutes);
   state.days[dateKey] = { targetMinutes };
-  saveState();
 }
 
-function addCompensation(dateKey, minutes, note) {
-  state.compensations.push({ id: crypto.randomUUID(), date: dateKey, minutes, note: note || '' });
-  saveState();
+async function addCompensation(dateKey, minutes, note) {
+  const compensation = await db.insertCompensation({ date: dateKey, minutes, note });
+  state.compensations.push(compensation);
 }
 
-function updateCompensation(compensationId, dateKey, minutes, note) {
-  const compensation = state.compensations.find((item) => item.id === compensationId);
-  if (!compensation) return;
-  compensation.date = dateKey;
-  compensation.minutes = minutes;
-  compensation.note = note || '';
-  saveState();
+async function updateCompensation(compensationId, dateKey, minutes, note) {
+  const updated = await db.updateCompensation(compensationId, { date: dateKey, minutes, note });
+  state.compensations = state.compensations.map((item) => (item.id === updated.id ? updated : item));
 }
 
-function deleteCompensation(compensationId) {
+async function deleteCompensation(compensationId) {
+  await db.deleteCompensation(compensationId);
   state.compensations = state.compensations.filter((item) => item.id !== compensationId);
-  saveState();
+}
+
+async function updateSettings(changes) {
+  const next = { ...state.settings, ...changes };
+  await db.saveSettings(currentUserId, next);
+  state.settings = next;
 }
 
 /* --------------------------------------------------------------------------
@@ -475,10 +426,6 @@ async function tryShareCsv(filename, csvContent) {
   }
 }
 
-function recordExportTimestamp() {
-  state.settings.lastExportAt = new Date().toISOString();
-  saveState();
-}
 
 async function exportEntriesAsCsv() {
   const filename = `kalika-track-export-${todayKey()}.csv`;
@@ -486,8 +433,7 @@ async function exportEntriesAsCsv() {
   const outcome = await tryShareCsv(filename, csvContent);
   if (outcome === 'cancelled') return; // user actively declined; don't force a download too
   if (outcome === 'unsupported') downloadTextFile(filename, csvContent, 'text/csv;charset=utf-8;');
-  recordExportTimestamp();
-  renderBackupReminder();
+  await runMutation(() => updateSettings({ lastExportAt: new Date().toISOString() }));
 }
 
 function detectCsvDelimiter(text) {
@@ -628,24 +574,10 @@ function parseImportCsv(text) {
   return { sessions, compensations, dayTargets, errors };
 }
 
-/** Commits parsed import results into state with a single save. */
-function applyImportedEntries(sessions, compensations, dayTargets) {
-  sessions.forEach((session) => {
-    state.sessions.push({
-      id: crypto.randomUUID(),
-      start: session.startIso,
-      end: session.endIso,
-      breakMinutes: session.breakMinutes,
-      note: session.note || '',
-    });
-  });
-  compensations.forEach((comp) => {
-    state.compensations.push({ id: crypto.randomUUID(), date: comp.date, minutes: comp.minutes, note: comp.note || '' });
-  });
-  Object.entries(dayTargets).forEach(([dateKey, targetMinutes]) => {
-    state.days[dateKey] = { targetMinutes };
-  });
-  saveState();
+/** Saves parsed import results in one transaction, then reloads everything from the server. */
+async function applyImportedEntries(sessions, compensations, dayTargets) {
+  await db.importEntries(sessions, compensations, dayTargets);
+  state = await db.fetchState();
 }
 
 /* --------------------------------------------------------------------------
@@ -957,9 +889,11 @@ let pendingImportResult = null;
  * like the rest of the app instead of the browser's default modal.
  * Resolves true if the user confirms, false if they cancel/dismiss.
  */
-function showConfirmDialog(message) {
+function showConfirmDialog(message, { title = 'Wirklich löschen?', confirmLabel = 'Löschen' } = {}) {
   return new Promise((resolve) => {
     pendingConfirmResolve = resolve;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-submit-btn').textContent = confirmLabel;
     confirmMessageEl.textContent = message;
     confirmDialog.returnValue = '';
     confirmDialog.showModal();
@@ -1065,8 +999,7 @@ function attachEventListeners() {
     if (running) {
       openStopDialog(running.id);
     } else {
-      startSession();
-      renderAll();
+      runMutation(startSession);
     }
   });
 
@@ -1088,9 +1021,7 @@ function attachEventListeners() {
   backupReminderDismissBtn.addEventListener('click', () => {
     const snoozeUntil = new Date();
     snoozeUntil.setDate(snoozeUntil.getDate() + BACKUP_REMINDER_SNOOZE_DAYS);
-    state.settings.backupReminderSnoozedUntil = snoozeUntil.toISOString();
-    saveState();
-    renderBackupReminder();
+    runMutation(() => updateSettings({ backupReminderSnoozedUntil: snoozeUntil.toISOString() }));
   });
 
   tabButtons.forEach((btn) => {
@@ -1110,9 +1041,9 @@ function attachEventListeners() {
     const breakMinutes = parseInt(document.getElementById('stop-break-minutes').value, 10) || 0;
     const targetMinutes = readHmInputs('stop-target-hours', 'stop-target-minutes') ?? state.settings.defaultTargetMinutes;
     const note = document.getElementById('stop-note').value.trim();
-    stopSession(pendingStopSessionId, breakMinutes, targetMinutes, note);
+    const sessionId = pendingStopSessionId;
     pendingStopSessionId = null;
-    renderAll();
+    runMutation(() => stopSession(sessionId, breakMinutes, targetMinutes, note));
   });
 
   compensationDialog.addEventListener('close', () => {
@@ -1121,8 +1052,7 @@ function attachEventListeners() {
     const minutes = readHmInputs('compensation-hours', 'compensation-minutes');
     if (!minutes) return;
     const note = document.getElementById('compensation-note').value.trim();
-    addCompensation(dateKey, minutes, note);
-    renderAll();
+    runMutation(() => addCompensation(dateKey, minutes, note));
   });
 
   compensationEditDialog.addEventListener('close', async () => {
@@ -1130,8 +1060,7 @@ function attachEventListeners() {
       const compensationIdToDelete = pendingCompensationEditId;
       pendingCompensationEditId = null;
       if (await showConfirmDialog('Ausgleichseintrag löschen?')) {
-        deleteCompensation(compensationIdToDelete);
-        renderAll();
+        await runMutation(() => deleteCompensation(compensationIdToDelete));
       }
       return;
     }
@@ -1140,17 +1069,17 @@ function attachEventListeners() {
     const minutes = readHmInputs('compensation-edit-hours', 'compensation-edit-minutes');
     if (!dateKey || !minutes) return;
     const note = document.getElementById('compensation-edit-note').value.trim();
-    updateCompensation(pendingCompensationEditId, dateKey, minutes, note);
+    const compensationId = pendingCompensationEditId;
     pendingCompensationEditId = null;
-    renderAll();
+    runMutation(() => updateCompensation(compensationId, dateKey, minutes, note));
   });
 
   daySettingsDialog.addEventListener('close', () => {
     if (daySettingsDialog.returnValue !== 'confirm' || !pendingDayDateKey) return;
     const targetMinutes = readHmInputs('day-target-hours', 'day-target-minutes') ?? state.settings.defaultTargetMinutes;
-    setDayMeta(pendingDayDateKey, targetMinutes);
+    const dateKey = pendingDayDateKey;
     pendingDayDateKey = null;
-    renderAll();
+    runMutation(() => setDayMeta(dateKey, targetMinutes));
   });
 
   sessionEditDialog.addEventListener('close', async () => {
@@ -1158,8 +1087,7 @@ function attachEventListeners() {
       const sessionIdToDelete = pendingSessionEditId;
       pendingSessionEditId = null;
       if (await showConfirmDialog('Diese Sitzung wirklich löschen?')) {
-        deleteSession(sessionIdToDelete);
-        renderAll();
+        await runMutation(() => deleteSession(sessionIdToDelete));
       }
       return;
     }
@@ -1185,9 +1113,9 @@ function attachEventListeners() {
 
     const breakMinutes = parseInt(document.getElementById('session-edit-break').value, 10) || 0;
     const note = document.getElementById('session-edit-note').value.trim();
-    updateSession(pendingSessionEditId, startDate.toISOString(), endDate ? endDate.toISOString() : null, breakMinutes, note);
+    const sessionId = pendingSessionEditId;
     pendingSessionEditId = null;
-    renderAll();
+    runMutation(() => updateSession(sessionId, startDate.toISOString(), endDate ? endDate.toISOString() : null, breakMinutes, note));
   });
 
   manualEntryDialog.addEventListener('close', () => {
@@ -1204,8 +1132,7 @@ function attachEventListeners() {
 
     const breakMinutes = parseInt(document.getElementById('manual-entry-break').value, 10) || 0;
     const note = document.getElementById('manual-entry-note').value.trim();
-    addManualSession(startDate.toISOString(), endDate.toISOString(), breakMinutes, note);
-    renderAll();
+    runMutation(() => addManualSession(startDate.toISOString(), endDate.toISOString(), breakMinutes, note));
   });
 
   confirmDialog.addEventListener('close', () => {
@@ -1218,8 +1145,7 @@ function attachEventListeners() {
     const result = pendingImportResult;
     pendingImportResult = null;
     if (importDialog.returnValue !== 'confirm' || !result) return;
-    applyImportedEntries(result.sessions, result.compensations, result.dayTargets);
-    renderAll();
+    runMutation(() => applyImportedEntries(result.sessions, result.compensations, result.dayTargets));
   });
 
   // Event delegation for dynamically rendered entry rows, shared by both lists.
@@ -1357,11 +1283,205 @@ function initHeaderNetworkAnimation() {
 }
 
 /* --------------------------------------------------------------------------
-   Service worker registration (offline support)
+   Saving + error feedback
+   -------------------------------------------------------------------------- */
+
+const toastEl = document.getElementById('toast');
+let toastTimeout = null;
+let mutationInFlight = false;
+
+function showToast(message) {
+  toastEl.textContent = message;
+  toastEl.hidden = false;
+  clearTimeout(toastTimeout);
+  toastTimeout = setTimeout(() => {
+    toastEl.hidden = true;
+  }, 5000);
+}
+
+function describeSaveError(error) {
+  // 23505 on the "one running session" index: a session was started elsewhere meanwhile.
+  if (error?.code === '23505') return 'Es läuft bereits eine Sitzung (evtl. auf einem anderen Gerät).';
+  if (error?.code === '23514') return 'Ungültige Eingabe, bitte prüfen (z. B. Ende vor Start).';
+  if (!navigator.onLine) return 'Keine Internetverbindung. Änderung wurde nicht gespeichert.';
+  return 'Speichern fehlgeschlagen. Bitte erneut versuchen.';
+}
+
+/**
+ * Runs a state mutation (which writes to Supabase), then re-renders.
+ * Ignores taps while another save is still running, so a double tap on
+ * "Start" can't create two sessions. On failure the state is reloaded from
+ * the server so the UI never drifts from what's actually stored.
+ */
+async function runMutation(mutation) {
+  if (mutationInFlight) return;
+  mutationInFlight = true;
+  document.body.classList.add('is-saving');
+  try {
+    await mutation();
+  } catch (error) {
+    console.error('kalika-track: saving failed.', error);
+    showToast(describeSaveError(error));
+    await reloadState();
+  } finally {
+    mutationInFlight = false;
+    document.body.classList.remove('is-saving');
+    renderAll();
+  }
+}
+
+/** Re-fetches everything from Supabase. Keeps the current state if that fails (e.g. offline). */
+async function reloadState() {
+  if (!currentUserId) return;
+  try {
+    state = await db.fetchState();
+  } catch (error) {
+    console.error('kalika-track: loading data failed.', error);
+    showToast('Daten konnten nicht geladen werden. Bitte Verbindung prüfen.');
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Login screen + session handling
+   -------------------------------------------------------------------------- */
+
+const loginScreenEl = document.getElementById('login-screen');
+const appShellEl = document.getElementById('app-shell');
+const loadingScreenEl = document.getElementById('loading-screen');
+const loginFormEl = document.getElementById('login-form');
+const loginSubtitleEl = document.getElementById('login-subtitle');
+const loginEmailEl = document.getElementById('login-email');
+const loginPasswordEl = document.getElementById('login-password');
+const loginSubmitBtn = document.getElementById('login-submit-btn');
+const loginErrorEl = document.getElementById('login-error');
+const loginInfoEl = document.getElementById('login-info');
+const loginToggleEl = document.getElementById('login-toggle');
+const loginTogglePromptEl = document.getElementById('login-toggle-prompt');
+const loginToggleBtn = document.getElementById('login-toggle-btn');
+const privateNoticeEl = document.getElementById('private-notice');
+
+let loginMode = 'signIn';
+let headerAnimationStarted = false;
+
+function setLoginMessage(errorText = '', infoText = '') {
+  loginErrorEl.textContent = errorText;
+  loginErrorEl.hidden = !errorText;
+  loginInfoEl.textContent = infoText;
+  loginInfoEl.hidden = !infoText;
+}
+
+function renderLoginMode() {
+  const isSignIn = loginMode === 'signIn';
+  loginSubtitleEl.textContent = isSignIn
+    ? 'Melde dich an, um deine Arbeitszeit zu erfassen.'
+    : 'Erstelle ein Konto für deine Zeiterfassung.';
+  loginSubmitBtn.textContent = isSignIn ? 'Anmelden' : 'Registrieren';
+  loginPasswordEl.autocomplete = isSignIn ? 'current-password' : 'new-password';
+  loginTogglePromptEl.textContent = isSignIn ? 'Noch kein Konto?' : 'Schon registriert?';
+  loginToggleBtn.textContent = isSignIn ? 'Registrieren' : 'Anmelden';
+}
+
+function showScreen(name) {
+  loadingScreenEl.hidden = name !== 'loading';
+  loginScreenEl.hidden = name !== 'login';
+  appShellEl.hidden = name !== 'app';
+  document.body.classList.toggle('has-tab-bar', name === 'app');
+
+  // The header canvas measures itself, so it can only start once it's visible.
+  if (name === 'app' && !headerAnimationStarted) {
+    headerAnimationStarted = true;
+    initHeaderNetworkAnimation();
+  }
+}
+
+/** Switches the UI to whoever is signed in now (or to the login screen). */
+async function handleSession(session) {
+  const userId = session?.user?.id ?? null;
+  if (userId === currentUserId) return; // token refresh etc., nothing changed
+
+  currentUserId = userId;
+  state = createEmptyState();
+  lastGlobalBalanceMinutes = null;
+  lastTodayBalanceMinutes = null;
+
+  if (!userId) {
+    renderAll();
+    setLoginMessage();
+    loginPasswordEl.value = '';
+    showScreen('login');
+    return;
+  }
+
+  showScreen('loading');
+  await reloadState();
+  if (currentUserId !== userId) return; // signed out while loading
+  document.getElementById('account-email').textContent = session.user.email ?? '';
+  renderAll();
+  showScreen('app');
+}
+
+function attachLoginListeners() {
+  if (signupEnabled) {
+    loginToggleEl.hidden = false;
+    loginToggleBtn.addEventListener('click', () => {
+      loginMode = loginMode === 'signIn' ? 'signUp' : 'signIn';
+      setLoginMessage();
+      renderLoginMode();
+    });
+  } else {
+    privateNoticeEl.hidden = false;
+  }
+
+  loginFormEl.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    setLoginMessage();
+    loginSubmitBtn.disabled = true;
+    loginSubmitBtn.textContent = 'Bitte warten …';
+    try {
+      if (loginMode === 'signIn') {
+        await signInWithPassword(loginEmailEl.value, loginPasswordEl.value);
+      } else if (!(await signUp(loginEmailEl.value, loginPasswordEl.value))) {
+        setLoginMessage('', 'Fast geschafft! Bitte bestätige deine E-Mail-Adresse über den Link, den wir dir geschickt haben.');
+      }
+    } catch (error) {
+      setLoginMessage(translateAuthError(error));
+    } finally {
+      loginSubmitBtn.disabled = false;
+      renderLoginMode();
+    }
+  });
+
+  document.getElementById('login-google-btn').addEventListener('click', async () => {
+    setLoginMessage();
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      setLoginMessage(translateAuthError(error));
+    }
+  });
+
+  document.getElementById('logout-btn').addEventListener('click', async () => {
+    if (await showConfirmDialog('Möchtest du dich abmelden?', { title: 'Abmelden', confirmLabel: 'Abmelden' })) {
+      await signOut();
+    }
+  });
+
+  // Data may have changed on another device while the app was in the background.
+  document.addEventListener('visibilitychange', async () => {
+    if (document.hidden || !currentUserId || mutationInFlight) return;
+    if (document.querySelector('dialog[open]')) return;
+    await reloadState();
+    renderAll();
+  });
+}
+
+/* --------------------------------------------------------------------------
+   Service worker registration (offline start of the app shell)
    -------------------------------------------------------------------------- */
 
 function registerServiceWorker() {
-  if (!('serviceWorker' in navigator)) return;
+  // The dev server would fight with a caching service worker, so production only.
+  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return;
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js').catch((error) => {
       console.error('kalika-track: service worker registration failed.', error);
@@ -1374,6 +1494,11 @@ function registerServiceWorker() {
    -------------------------------------------------------------------------- */
 
 attachEventListeners();
+attachLoginListeners();
+renderLoginMode();
 registerServiceWorker();
-initHeaderNetworkAnimation();
-renderAll();
+
+initAuth().then(async (session) => {
+  await handleSession(session);
+  onSessionChange(handleSession);
+});

@@ -619,9 +619,18 @@ const todayTargetEl = document.getElementById('today-target');
 const todayBalanceEl = document.getElementById('today-balance');
 const todayListEl = document.getElementById('today-list');
 const todayEmptyEl = document.getElementById('today-empty');
+const todayGoalEl = document.getElementById('today-goal');
+const todayPercentEl = document.getElementById('today-percent');
+const todayProgressEl = document.getElementById('today-progress');
+const todayProgressFillEl = document.getElementById('today-progress-fill');
+const weekChartEl = document.getElementById('week-chart');
+const weekBalanceEl = document.getElementById('week-balance');
+const weekSummaryEl = document.getElementById('week-summary');
 let runningTimerInterval = null;
 let lastGlobalBalanceMinutes = null;
 let lastTodayBalanceMinutes = null;
+/** Minute of the last live refresh while a session runs (see onRunningTick). */
+let lastLiveMinute = null;
 /** Which "YYYY-MM" months are expanded in the Historie view. Empty = all collapsed. */
 const expandedMonths = new Set();
 
@@ -650,6 +659,7 @@ function renderAll() {
   renderToggleButton();
   renderRunningIndicator();
   renderToday();
+  renderWeek();
   renderHistory();
 }
 
@@ -668,7 +678,9 @@ function renderGlobalBalance() {
 
 function renderToggleButton() {
   const running = getRunningSession();
-  toggleTrackingBtn.textContent = running ? 'Stopp' : 'Start';
+  toggleTrackingBtn.textContent = running
+    ? `Stopp · ${formatHM(Math.floor((Date.now() - new Date(running.start)) / 60000))}`
+    : 'Start';
   toggleTrackingBtn.classList.toggle('is-running', Boolean(running));
 }
 
@@ -680,13 +692,33 @@ function renderRunningIndicator() {
       clearInterval(runningTimerInterval);
       runningTimerInterval = null;
     }
+    lastLiveMinute = null;
     return;
   }
   runningIndicatorEl.hidden = false;
   document.getElementById('running-since').textContent = formatTime(running.start);
   updateRunningElapsed(running.start);
   if (!runningTimerInterval) {
-    runningTimerInterval = setInterval(() => updateRunningElapsed(running.start), 1000);
+    runningTimerInterval = setInterval(onRunningTick, 1000);
+  }
+}
+
+/**
+ * Once per second while a session runs. Reads the running session fresh each
+ * time (its start may have been edited). Live stats and the week chart only
+ * change per minute, so they're re-rendered on a minute change only, which
+ * also keeps hover tooltips on the week chart from flickering.
+ */
+function onRunningTick() {
+  const running = getRunningSession();
+  if (!running) return;
+  updateRunningElapsed(running.start);
+  renderToggleButton();
+  const minute = Math.floor(Date.now() / 60000);
+  if (minute !== lastLiveMinute) {
+    lastLiveMinute = minute;
+    renderTodayLive(false);
+    renderWeek();
   }
 }
 
@@ -695,16 +727,56 @@ function updateRunningElapsed(startIso) {
   document.getElementById('running-elapsed').textContent = formatElapsedClock(elapsedSeconds);
 }
 
-/** Dashboard "Heute" card: today's worked/target/balance stats + today's entries. */
+/**
+ * Break assumed for a still-running session: the default break the stop
+ * dialog will suggest, unless a break was already logged that day.
+ */
+function projectedBreakMinutes(dateKey) {
+  const breakTaken = getCompletedSessionsForDate(dateKey).some((session) => (session.breakMinutes || 0) > 0);
+  return breakTaken ? 0 : state.settings.defaultBreakMinutes;
+}
+
+/** Worked minutes of a day including a session that is still running (minus its projected break). */
+function liveDayWorkedMinutes(dateKey) {
+  const worked = dayWorkedMinutes(dateKey);
+  const running = getRunningSession();
+  if (!running || toDateKey(new Date(running.start)) !== dateKey) return worked;
+  const elapsed = (Date.now() - new Date(running.start)) / 60000;
+  return worked + Math.max(0, elapsed - projectedBreakMinutes(dateKey));
+}
+
+/** Dashboard "Heute" card: today's entries plus the live stats (see renderTodayLive). */
 function renderToday() {
   const dateKey = todayKey();
-  const meta = getDayMeta(dateKey);
-  const worked = dayWorkedMinutes(dateKey);
-  const balance = dayBalanceMinutes(dateKey);
+  renderTodayLive(true);
+
+  const group = buildDayGroup(dateKey);
+  const hasEntries = group.sessions.length > 0 || group.compensations.length > 0;
+  if (!hasEntries) {
+    todayListEl.innerHTML = '';
+    todayEmptyEl.innerHTML = renderTodayEmptyState();
+    todayEmptyEl.hidden = false;
+    return;
+  }
+  todayEmptyEl.hidden = true;
+  todayListEl.innerHTML = group.sessions.map(renderSessionRow).join('') + group.compensations.map(renderCompensationRow).join('');
+  applyStaggerIndex(todayListEl.querySelectorAll('.entry-row'));
+}
+
+/**
+ * Worked / target / balance, the progress bar and the "goal reached at" line.
+ * Includes a running session. `animate` is false for the per-minute live
+ * refresh so the balance doesn't bounce every minute.
+ */
+function renderTodayLive(animate) {
+  const dateKey = todayKey();
+  const target = getDayMeta(dateKey).targetMinutes;
+  const worked = Math.floor(liveDayWorkedMinutes(dateKey));
+  const balance = worked - target;
 
   todayWorkedEl.textContent = formatDurationHours(worked);
-  todayTargetEl.textContent = `${formatHM(meta.targetMinutes)}h`;
-  if (lastTodayBalanceMinutes === null) {
+  todayTargetEl.textContent = `${formatHM(target)}h`;
+  if (lastTodayBalanceMinutes === null || !animate) {
     todayBalanceEl.textContent = formatBalance(balance);
   } else if (balance !== lastTodayBalanceMinutes) {
     animateNumberChange(todayBalanceEl, lastTodayBalanceMinutes, balance, formatBalance);
@@ -714,16 +786,128 @@ function renderToday() {
   todayBalanceEl.classList.toggle('negative', balance < 0);
   lastTodayBalanceMinutes = balance;
 
-  const group = buildDayGroup(dateKey);
-  const hasEntries = group.sessions.length > 0 || group.compensations.length > 0;
-  if (!hasEntries) {
-    todayListEl.innerHTML = '';
-    todayEmptyEl.hidden = false;
-    return;
+  const percent = target > 0 ? Math.min(100, Math.round((worked / target) * 100)) : worked > 0 ? 100 : 0;
+  const reached = worked > 0 && worked >= target;
+  todayProgressEl.setAttribute('aria-valuenow', String(percent));
+  todayProgressEl.setAttribute('aria-valuetext', `${formatDurationHours(worked)} von ${formatDurationHours(target)}`);
+  todayProgressFillEl.style.width = `${percent}%`;
+  todayProgressFillEl.classList.toggle('is-complete', reached);
+  todayPercentEl.textContent = target > 0 ? `${percent} %` : '';
+  todayGoalEl.textContent = describeTodayGoal(dateKey, worked, target);
+}
+
+/** One-line status under today's stats: when the target will be reached, or how far past it. */
+function describeTodayGoal(dateKey, worked, target) {
+  if (worked > 0 && worked >= target) {
+    return worked === target ? 'Ziel erreicht' : `Ziel erreicht · +${formatDurationHours(worked - target)} über Ziel`;
   }
-  todayEmptyEl.hidden = true;
-  todayListEl.innerHTML = group.sessions.map(renderSessionRow).join('') + group.compensations.map(renderCompensationRow).join('');
-  applyStaggerIndex(todayListEl.querySelectorAll('.entry-row'));
+  const running = getRunningSession();
+  if (running && toDateKey(new Date(running.start)) === dateKey) {
+    // Live worked = completed + (elapsed - break), so the target is reached at
+    // elapsed = target - completed + break.
+    const minutesFromStart = target - dayWorkedMinutes(dateKey) + projectedBreakMinutes(dateKey);
+    const reachAt = new Date(new Date(running.start).getTime() + minutesFromStart * 60000);
+    return `Ziel erreicht um ${formatTime(reachAt.toISOString())}`;
+  }
+  if (worked > 0) return `Noch ${formatDurationHours(target - worked)} bis zum Ziel`;
+  return `Ziel heute: ${formatDurationHours(target)}`;
+}
+
+/** Empty "Heute" list: a nudge to start, plus the last tracked day for orientation. */
+function renderTodayEmptyState() {
+  const today = todayKey();
+  const lastDateKey = getTrackedDateKeys()
+    .filter((dateKey) => dateKey < today)
+    .sort()
+    .pop();
+  const lastHtml = lastDateKey
+    ? `<p class="today-empty-last">Zuletzt: ${escapeHtml(formatDateHeading(lastDateKey))} · ${formatDurationHours(dayWorkedMinutes(lastDateKey))} <span class="${dayBalanceMinutes(lastDateKey) >= 0 ? 'positive' : 'negative'}">(${formatBalance(dayBalanceMinutes(lastDateKey))})</span></p>`
+    : '';
+  return `<p class="today-empty-title">Heute noch nichts erfasst.</p><p class="today-empty-hint">Starte den Timer, sobald du loslegst.</p>${lastHtml}`;
+}
+
+const WEEKDAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+
+/** "YYYY-MM-DD" keys of the current week, Monday first. */
+function currentWeekDateKeys() {
+  const now = new Date();
+  const mondayOffset = (now.getDay() + 6) % 7;
+  return WEEKDAY_LABELS.map((_, index) =>
+    toDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset + index))
+  );
+}
+
+/**
+ * "Diese Woche" card: one bar per day (worked, incl. a running session)
+ * against a tick at that day's target. Weekends only appear when worked.
+ * The week balance counts completed days only, like the header balance.
+ */
+function renderWeek() {
+  const today = todayKey();
+  const weekKeys = currentWeekDateKeys();
+  const running = getRunningSession();
+  const runningKey = running ? toDateKey(new Date(running.start)) : null;
+
+  const days = weekKeys
+    .map((dateKey, index) => {
+      const worked = Math.floor(liveDayWorkedMinutes(dateKey));
+      const hasWork = getCompletedSessionsForDate(dateKey).length > 0 || runningKey === dateKey;
+      return {
+        dateKey,
+        label: WEEKDAY_LABELS[index],
+        worked,
+        hasWork,
+        target: getDayMeta(dateKey).targetMinutes,
+        isToday: dateKey === today,
+        isFuture: dateKey > today,
+        isWeekend: index >= 5,
+      };
+    })
+    .filter((day) => !day.isWeekend || day.hasWork);
+
+  const scaleMax = Math.max(60, ...days.map((day) => Math.max(day.worked, day.target)));
+  weekChartEl.innerHTML = days.map((day) => renderWeekDay(day, scaleMax)).join('');
+
+  const trackedKeys = getTrackedDateKeys().filter((dateKey) => weekKeys.includes(dateKey));
+  const compensationMinutes = state.compensations
+    .filter((comp) => weekKeys.includes(comp.date))
+    .reduce((sum, comp) => sum + comp.minutes, 0);
+  const balance = trackedKeys.reduce((sum, dateKey) => sum + dayBalanceMinutes(dateKey), 0) - compensationMinutes;
+  weekBalanceEl.textContent = formatBalance(balance);
+  weekBalanceEl.classList.toggle('positive', balance >= 0);
+  weekBalanceEl.classList.toggle('negative', balance < 0);
+
+  const workedDays = days.filter((day) => day.hasWork);
+  const totalWorked = workedDays.reduce((sum, day) => sum + day.worked, 0);
+  weekSummaryEl.textContent = workedDays.length
+    ? `${formatDurationHours(totalWorked)} gearbeitet an ${workedDays.length} ${workedDays.length === 1 ? 'Tag' : 'Tagen'}`
+    : 'Diese Woche noch nichts erfasst.';
+}
+
+function renderWeekDay(day, scaleMax) {
+  const barPercent = (day.worked / scaleMax) * 100;
+  const targetPercent = (day.target / scaleMax) * 100;
+  const detail = day.hasWork
+    ? `${formatDurationHours(day.worked)} von ${formatDurationHours(day.target)} (${formatBalance(day.worked - day.target)})`
+    : day.isFuture
+      ? `Ziel ${formatDurationHours(day.target)}`
+      : 'nichts erfasst';
+  const label = `${formatDateHeading(day.dateKey)}: ${detail}`;
+  const classes = ['week-day', day.isToday ? 'is-today' : '', day.isFuture ? 'is-future' : '', day.hasWork && day.worked >= day.target ? 'is-complete' : '']
+    .filter(Boolean)
+    .join(' ');
+
+  return `
+    <div class="${classes}" role="img" tabindex="0" aria-label="${escapeHtml(label)}">
+      <div class="week-bar-area">
+        ${day.target > 0 ? `<span class="week-target" style="bottom: ${targetPercent}%"></span>` : ''}
+        ${day.hasWork ? `<span class="week-bar" style="height: ${barPercent}%"></span>` : ''}
+        <span class="week-tip" aria-hidden="true">${escapeHtml(label)}</span>
+      </div>
+      <span class="week-day-label">${day.label}</span>
+      <span class="week-day-value">${day.hasWork ? formatHM(day.worked) : '–'}</span>
+    </div>
+  `;
 }
 
 /** Sets a CSS custom property used by the entry-row/day-group fly-in animation delay. */
@@ -983,7 +1167,18 @@ function openImportDialog(result) {
    Event wiring
    -------------------------------------------------------------------------- */
 
+/** Desktop shortcut: Space starts/stops the timer on the dashboard, unless focus is in a control or a dialog is open. */
+function handleTimerShortcut(event) {
+  if (event.code !== 'Space' || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (!views.dashboard.classList.contains('is-active') || document.getElementById('app-shell').hidden) return;
+  if (document.querySelector('dialog[open]')) return;
+  if (event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
+  event.preventDefault();
+  toggleTrackingBtn.click();
+}
+
 function attachEventListeners() {
+  document.addEventListener('keydown', handleTimerShortcut);
   toggleTrackingBtn.addEventListener('click', () => {
     const running = getRunningSession();
     if (running) {

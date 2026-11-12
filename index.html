@@ -90,6 +90,7 @@
   <main id="view-dashboard" class="view is-active">
     <div class="actions">
       <button id="toggle-tracking-btn" class="btn btn-primary btn-large" type="button">Start</button>
+      <p class="kbd-hint"><kbd>Leertaste</kbd> startet und stoppt den Timer</p>
     </div>
 
     <section class="today-card">
@@ -108,8 +109,27 @@
           <span id="today-balance" class="today-stat-value">+00:00h</span>
         </div>
       </div>
+      <div class="today-progress">
+        <div class="today-progress-row">
+          <span id="today-goal" class="today-goal"></span>
+          <span id="today-percent" class="today-percent"></span>
+        </div>
+        <div id="today-progress" class="progress-track" role="progressbar" aria-label="Fortschritt heute" aria-valuemin="0" aria-valuemax="100">
+          <div id="today-progress-fill" class="progress-fill"></div>
+        </div>
+      </div>
       <div id="today-list" class="today-list"></div>
-      <p id="today-empty" class="history-empty" hidden>Heute noch keine Einträge.</p>
+      <div id="today-empty" class="today-empty" hidden></div>
+    </section>
+
+    <!-- Current week: worked time per day against each day's target -->
+    <section class="week-card">
+      <div class="week-header">
+        <h2 class="section-title">Diese Woche</h2>
+        <span id="week-balance" class="week-balance"></span>
+      </div>
+      <div id="week-chart" class="week-chart" role="group" aria-label="Arbeitszeit diese Woche"></div>
+      <p id="week-summary" class="week-summary"></p>
     </section>
   </main>
 

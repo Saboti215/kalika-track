@@ -22,6 +22,11 @@
   --text-muted: #55645c;
   --border: #d8e0da;
   --shadow: rgba(20, 40, 30, 0.12);
+
+  /* Data marks (progress bar, week chart) */
+  --bar: var(--accent-light);
+  --bar-complete: var(--accent);
+  --track: #e3e9e5;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -35,6 +40,10 @@
 
     --positive: #74c69d;
     --negative: #e5877e;
+
+    --bar: #52b788;
+    --bar-complete: #74c69d;
+    --track: #223529;
   }
 }
 
@@ -619,6 +628,225 @@ body.has-tab-bar {
   margin-top: 0.5rem;
 }
 
+/* Progress toward today's target */
+.today-progress {
+  margin-top: 0.9rem;
+}
+
+.today-progress-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.today-goal {
+  font-weight: 600;
+}
+
+.today-percent {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--bar);
+  transition: width 600ms cubic-bezier(0.22, 1, 0.36, 1), background-color 300ms ease;
+}
+
+.progress-fill.is-complete {
+  background: var(--bar-complete);
+}
+
+/* Empty "Heute" list */
+.today-empty {
+  text-align: center;
+  padding: 1.25rem 0 0.5rem;
+}
+
+.today-empty[hidden] {
+  display: none;
+}
+
+.today-empty p {
+  margin: 0;
+}
+
+.today-empty-title {
+  font-weight: 600;
+}
+
+.today-empty-hint,
+.today-empty-last {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 0.2rem !important;
+}
+
+.today-empty-last {
+  margin-top: 0.75rem !important;
+}
+
+/* Keyboard hint below the timer button, desktop only */
+.kbd-hint {
+  display: none;
+}
+
+/* ---------- Week card (Dashboard) ---------- */
+
+.week-card {
+  margin-top: 1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  padding: 1rem;
+  animation: fadeSlideUp 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 300ms;
+}
+
+.week-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.week-balance {
+  font-weight: 700;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.week-chart {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.week-day {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 0.5rem;
+  outline: none;
+}
+
+.week-day:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.week-bar-area {
+  position: relative;
+  width: 100%;
+  height: 5.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.week-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(70%, 1.75rem);
+  border-radius: 4px 4px 0 0;
+  background: var(--bar);
+  transition: height 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.week-day.is-complete .week-bar {
+  background: var(--bar-complete);
+}
+
+/* Target tick: a short line across the bar slot at the day's target */
+.week-target {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, 1px);
+  width: min(90%, 2.25rem);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text-muted);
+  opacity: 0.55;
+  z-index: 1;
+}
+
+.week-day.is-future .week-target {
+  opacity: 0.3;
+}
+
+.week-day-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.week-day.is-today .week-day-label {
+  color: var(--text);
+}
+
+.week-day-value {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.week-tip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  width: max-content;
+  max-width: 14rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 0.5rem;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 0.75rem;
+  line-height: 1.3;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 6px 18px var(--shadow);
+}
+
+.week-day:hover .week-tip,
+.week-day:focus-visible .week-tip {
+  display: block;
+}
+
+/* Keep the first/last tooltip inside the card */
+.week-day:first-child .week-tip {
+  left: 0;
+  transform: none;
+}
+
+.week-day:last-child .week-tip {
+  left: auto;
+  right: 0;
+  transform: none;
+}
+
+.week-summary {
+  margin: 0.75rem 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 /* ---------- History / list view ---------- */
 
 .history-title {
@@ -1161,13 +1389,62 @@ body.has-tab-bar {
   /* Dashboard: timer control on the left, today's overview on the right. */
   #view-dashboard.is-active {
     display: grid;
-    grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr);
+    grid-template-columns: minmax(16rem, 20rem) minmax(0, 1fr);
+    grid-template-areas:
+      "actions today"
+      "week    today";
+    grid-template-rows: auto 1fr;
     gap: 1.5rem;
     align-items: start;
   }
 
   .actions {
+    grid-area: actions;
     margin: 0;
+  }
+
+  .today-card {
+    grid-area: today;
+  }
+
+  .week-card {
+    grid-area: week;
+    margin: 0;
+    padding: 1.25rem;
+    border-radius: 1.25rem;
+  }
+
+  .kbd-hint {
+    display: block;
+    margin: 0;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+
+  .kbd-hint kbd {
+    font: inherit;
+    font-weight: 600;
+    padding: 0.05rem 0.4rem;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 0.35rem;
+    background: var(--bg-elevated);
+    color: var(--text);
+  }
+
+  .today-progress {
+    margin-top: 1.1rem;
+  }
+
+  .progress-track {
+    height: 10px;
+  }
+
+  /* Duration sits next to the edit button instead of mid-row on wide cards. */
+  .entry-info {
+    flex: 1;
+    min-width: 0;
   }
 
   .btn-large {

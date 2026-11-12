@@ -1,0 +1,14 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        # Read from .env next to this file (see .env.example).
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+    image: kalika-track:latest
+    ports:
+      # 8081 so it can run next to kalika-whish (8080) on the same host.
+      - "8081:80"
+    restart: unless-stopped

@@ -1,71 +1,50 @@
 # kalika-track
 
 Eine mobile-first Progressive Web App (PWA) zur Zeiterfassung mit
-Überstunden-/Flexzeitkonto. Läuft vollständig clientseitig (kein Backend,
-keine Build-Tools) und speichert alle Daten lokal im `localStorage` des
-Geräts.
+Überstunden-/Flexzeitkonto. Die Daten liegen in Supabase, angemeldet wird
+per E-Mail/Passwort oder Google, so dass dieselben Daten auf allen Geräten verfügbar sind.
 
 ## Features
 
-- Start/Stopp-Zeiterfassung, mehrere Sitzungen pro Tag möglich
+- Start/Stopp-Zeiterfassung, mehrere Sitzungen pro Tag möglich, geräteübergreifend
+  (Start am Handy, Stopp am Rechner)
 - Pausenzeit und Ziel-Arbeitszeit pro Tag einstellbar (Standard: 8:00h / 30min)
 - Automatische Berechnung des globalen Überstundensaldos
 - Ausgleich (Freizeitausgleich) bucht Zeit direkt vom Saldo ab
 - Tage ohne Zeiterfassung wirken sich nicht negativ auf den Saldo aus
-- Vollständige Listenansicht aller Einträge, gruppiert nach Tag
-- Offline-fähig via Service Worker, installierbar auf dem iPhone-Homescreen
+- Historie gruppiert nach Monat und Tag
+- CSV-Export und -Import (Backup, Umzug aus der alten localStorage-Version)
+- Offline-Modus: Änderungen werden lokal zwischengespeichert und bei der nächsten Verbindung hochgeladen
+- Installierbar auf dem iPhone-Homescreen
 
-## Struktur
+## Setup
 
-Die eigentliche Anwendung liegt im Unterordner `app/`. Die `index.html` im
-Repository-Root ist eine schlichte Landingpage mit einem Button, der zur App
-verlinkt — der direkte Aufruf der Root-URL zeigt also nicht sofort die
-laufende Anwendung.
+1. Supabase einrichten, Schritt für Schritt in **[docs/supabase-setup.md](docs/supabase-setup.md)**
+   (Schema, Login, Docker, Datenübernahme).
+2. `cp .env.example .env` und Werte eintragen
+3. `npm install && npm run dev` → <http://localhost:5173>
 
-```
-index.html   Landingpage (Root)
-app/         eigentliche PWA (index.html, app.js, style.css, manifest.json, sw.js, icons/)
-```
+## Konfiguration (`.env`)
 
-Hinweis: Das ist eine reine UX-Weiche, keine Zugriffskontrolle — GitHub Pages
-ist statisches Hosting ohne Backend/Login, `app/` bleibt für jeden mit dem
-direkten Link erreichbar.
+| Variable | Bedeutung |
+|---|---|
+| `VITE_SUPABASE_URL` | Project URL von Supabase |
+| `VITE_SUPABASE_ANON_KEY` | öffentlicher anon/publishable Key |
+| `ENABLE_SIGNUP` | `false` blendet die Registrierung aus und zeigt den Hinweis auf eine private App |
 
-## Lokal testen
+Dieselben Variablen wie bei kalika-whish; beide Apps können sich ein Supabase-Projekt teilen.
 
-Da die App keine Build-Tools benötigt, reicht ein einfacher statischer
-Webserver im Repository-Root:
+## Deployment (Docker)
 
 ```bash
-python3 -m http.server 8080
+cp .env.example .env   # Supabase-URL und Anon-Key eintragen
+docker compose up -d --build
 ```
 
-Anschließend `http://localhost:8080` (Landingpage) oder direkt
-`http://localhost:8080/app/` (App) im Browser öffnen.
-
-## Deployment (GitHub Pages)
-
-Das Repository enthält einen GitHub-Actions-Workflow
-(`.github/workflows/deploy.yml`), der bei jedem Push auf `main` automatisch
-auf GitHub Pages deployt.
-
-Einmalig in den Repository-Einstellungen aktivieren:
-
-**Settings → Pages → Source → "GitHub Actions"**
-
-Danach ist die Landingpage unter `https://<user>.github.io/kalika-track/`
-und die App direkt unter `https://<user>.github.io/kalika-track/app/`
-erreichbar.
+Die App läuft danach auf Port `8081`, Details siehe
+[Supabase-Anleitung, Schritt 6](docs/supabase-setup.md#6-self-hosting-mit-docker).
 
 ## Auf dem iPhone installieren
 
-1. Die deployte URL in Safari öffnen und auf "App öffnen" tippen (das führt
-   zu `/app/` — genau von dort aus installieren, nicht von der Landingpage).
+1. Die App-URL in Safari öffnen und anmelden.
 2. Teilen-Symbol → "Zum Home-Bildschirm".
-3. Die App startet danach im Standalone-Modus mit eigenem Icon direkt in
-   `/app/`, ohne über die Landingpage zu gehen.
-
-> Falls die App vor dieser Umstrukturierung bereits auf dem Home-Bildschirm
-> installiert war, zeigt das alte Icon jetzt die Landingpage statt der App.
-> Einmalig entfernen und über Schritt 1–3 neu hinzufügen, damit es wieder
-> direkt in die App startet.

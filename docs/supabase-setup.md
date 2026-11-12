@@ -31,7 +31,8 @@ kalika-track nutzt dieselben Bausteine wie kalika-whish: Supabase für Datenbank
 **Variante A – SQL Editor:** Dashboard → **SQL Editor** → **New query** → nacheinander den Inhalt jeder Datei
 aus [`supabase/migrations/`](../supabase/migrations/) einfügen → **Run**:
 [`00001_initial_schema.sql`](../supabase/migrations/00001_initial_schema.sql), dann
-[`00002_idempotent_import.sql`](../supabase/migrations/00002_idempotent_import.sql) (CSV-Import für den Offline-Modus).
+[`00002_idempotent_import.sql`](../supabase/migrations/00002_idempotent_import.sql) (CSV-Import für den Offline-Modus), dann
+[`00003_drop_backup_reminder.sql`](../supabase/migrations/00003_drop_backup_reminder.sql) (entfernt die Spalten des alten Backup-Hinweises).
 
 **Variante B – Supabase CLI:**
 

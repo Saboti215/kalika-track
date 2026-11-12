@@ -229,8 +229,21 @@ function deleteCompensation(compensationId) {
   store.commit({ type: 'compensation.delete', id: compensationId });
 }
 
+/**
+ * Saves new per-user defaults. Days without their own target fall back to
+ * the default, so changing it would silently rewrite the balance of past
+ * days; those tracked days get the old default pinned in the same commit.
+ */
 function updateSettings(changes) {
-  store.commit({ type: 'settings.set', settings: { ...state.settings, ...changes } });
+  const nextSettings = { ...state.settings, ...changes };
+  const previousTarget = state.settings.defaultTargetMinutes;
+  const pinOps =
+    nextSettings.defaultTargetMinutes === previousTarget
+      ? []
+      : getTrackedDateKeys()
+          .filter((dateKey) => !state.days[dateKey])
+          .map((dateKey) => ({ type: 'day.set', date: dateKey, targetMinutes: previousTarget }));
+  store.commit(...pinOps, { type: 'settings.set', settings: nextSettings });
 }
 
 /* --------------------------------------------------------------------------
@@ -837,6 +850,7 @@ const compensationDialog = document.getElementById('compensation-dialog');
 const compensationEditDialog = document.getElementById('compensation-edit-dialog');
 const daySettingsDialog = document.getElementById('day-settings-dialog');
 const sessionEditDialog = document.getElementById('session-edit-dialog');
+const settingsDialog = document.getElementById('settings-dialog');
 const manualEntryDialog = document.getElementById('manual-entry-dialog');
 const confirmDialog = document.getElementById('confirm-dialog');
 const confirmMessageEl = document.getElementById('confirm-message');
@@ -907,6 +921,13 @@ function openDaySettingsDialog(dateKey) {
   setHmInputs('day-target-hours', 'day-target-minutes', meta.targetMinutes);
   daySettingsDialog.returnValue = '';
   daySettingsDialog.showModal();
+}
+
+function openSettingsDialog() {
+  setHmInputs('settings-target-hours', 'settings-target-minutes', state.settings.defaultTargetMinutes);
+  document.getElementById('settings-break-minutes').value = state.settings.defaultBreakMinutes;
+  settingsDialog.returnValue = '';
+  settingsDialog.showModal();
 }
 
 function openSessionEditDialog(sessionId) {
@@ -1042,6 +1063,15 @@ function attachEventListeners() {
     const dateKey = pendingDayDateKey;
     pendingDayDateKey = null;
     setDayMeta(dateKey, targetMinutes);
+  });
+
+  document.getElementById('settings-btn').addEventListener('click', openSettingsDialog);
+  settingsDialog.addEventListener('close', () => {
+    if (settingsDialog.returnValue !== 'confirm') return;
+    const defaultTargetMinutes = readHmInputs('settings-target-hours', 'settings-target-minutes');
+    const defaultBreakMinutes = parseInt(document.getElementById('settings-break-minutes').value, 10);
+    if (defaultTargetMinutes === null || Number.isNaN(defaultBreakMinutes) || defaultBreakMinutes < 0) return;
+    updateSettings({ defaultTargetMinutes, defaultBreakMinutes });
   });
 
   sessionEditDialog.addEventListener('close', async () => {

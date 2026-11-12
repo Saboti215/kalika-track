@@ -419,7 +419,6 @@ async function exportEntriesAsCsv() {
   const outcome = await tryShareCsv(filename, csvContent);
   if (outcome === 'cancelled') return; // user actively declined; don't force a download too
   if (outcome === 'unsupported') downloadTextFile(filename, csvContent, 'text/csv;charset=utf-8;');
-  updateSettings({ lastExportAt: new Date().toISOString() });
 }
 
 function detectCsvDelimiter(text) {
@@ -607,14 +606,6 @@ const todayTargetEl = document.getElementById('today-target');
 const todayBalanceEl = document.getElementById('today-balance');
 const todayListEl = document.getElementById('today-list');
 const todayEmptyEl = document.getElementById('today-empty');
-const backupReminderEl = document.getElementById('backup-reminder');
-const backupReminderTextEl = document.getElementById('backup-reminder-text');
-const backupReminderExportBtn = document.getElementById('backup-reminder-export-btn');
-const backupReminderDismissBtn = document.getElementById('backup-reminder-dismiss-btn');
-
-const BACKUP_REMINDER_INTERVAL_DAYS = 30;
-const BACKUP_REMINDER_SNOOZE_DAYS = 7;
-
 let runningTimerInterval = null;
 let lastGlobalBalanceMinutes = null;
 let lastTodayBalanceMinutes = null;
@@ -647,29 +638,6 @@ function renderAll() {
   renderRunningIndicator();
   renderToday();
   renderHistory();
-  renderBackupReminder();
-}
-
-/** Dismissible reminder banner on the Historie page when no recent backup exists. */
-function renderBackupReminder() {
-  const { lastExportAt, backupReminderSnoozedUntil } = state.settings;
-  const now = new Date();
-
-  if (backupReminderSnoozedUntil && new Date(backupReminderSnoozedUntil) > now) {
-    backupReminderEl.hidden = true;
-    return;
-  }
-
-  const daysSinceExport = lastExportAt ? Math.floor((now - new Date(lastExportAt)) / (1000 * 60 * 60 * 24)) : null;
-  const isOverdue = daysSinceExport === null || daysSinceExport >= BACKUP_REMINDER_INTERVAL_DAYS;
-  if (!isOverdue) {
-    backupReminderEl.hidden = true;
-    return;
-  }
-
-  backupReminderTextEl.textContent =
-    daysSinceExport === null ? 'Du hast noch kein Backup deiner Daten erstellt.' : `Letztes Backup vor ${daysSinceExport} Tagen.`;
-  backupReminderEl.hidden = false;
 }
 
 function renderGlobalBalance() {
@@ -1018,13 +986,6 @@ function attachEventListeners() {
     openImportDialog(parseImportCsv(text));
   });
 
-  backupReminderExportBtn.addEventListener('click', exportEntriesAsCsv);
-  backupReminderDismissBtn.addEventListener('click', () => {
-    const snoozeUntil = new Date();
-    snoozeUntil.setDate(snoozeUntil.getDate() + BACKUP_REMINDER_SNOOZE_DAYS);
-    updateSettings({ backupReminderSnoozedUntil: snoozeUntil.toISOString() });
-  });
-
   tabButtons.forEach((btn) => {
     btn.addEventListener('click', () => switchView(btn.dataset.view));
   });
@@ -1184,7 +1145,10 @@ function initHeaderNetworkAnimation() {
   if (!canvas || !canvas.getContext) return;
   const ctx = canvas.getContext('2d');
 
-  const PARTICLE_COUNT = 22;
+  // Scales with the header area so the wide desktop hero isn't sparse; phones keep 22.
+  const MIN_PARTICLES = 22;
+  const MAX_PARTICLES = 90;
+  const AREA_PER_PARTICLE = 4000;
   const MAX_LINK_DISTANCE = 90;
   const SPEED = 0.12;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -1205,7 +1169,7 @@ function initHeaderNetworkAnimation() {
   }
 
   function createParticles() {
-    particles = Array.from({ length: PARTICLE_COUNT }, () => ({
+    particles = Array.from({ length: Math.min(MAX_PARTICLES, Math.max(MIN_PARTICLES, Math.round((width * height) / AREA_PER_PARTICLE))) }, () => ({
       x: Math.random() * width,
       y: Math.random() * height,
       vx: (Math.random() - 0.5) * SPEED,

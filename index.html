@@ -117,16 +117,6 @@
   <section id="view-history" class="view">
     <h2 class="history-title">Alle Einträge</h2>
 
-    <div id="backup-reminder" class="backup-reminder" hidden>
-      <p id="backup-reminder-text" class="backup-reminder-text"></p>
-      <div class="backup-reminder-actions">
-        <button id="backup-reminder-export-btn" type="button" class="btn btn-primary btn-compact">Jetzt exportieren</button>
-        <button id="backup-reminder-dismiss-btn" type="button" class="btn-icon-ghost" aria-label="Erinnerung ausblenden">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
-    </div>
-
     <div class="history-actions">
       <button id="add-manual-entry-btn" class="btn btn-secondary btn-compact" type="button">Eintrag hinzufügen</button>
       <button id="add-compensation-btn" class="btn btn-secondary btn-compact" type="button">Ausgleich hinzufügen</button>
@@ -136,7 +126,6 @@
       <button id="import-csv-btn" class="btn btn-secondary btn-compact" type="button">CSV importieren</button>
       <input type="file" id="import-csv-input" accept=".csv,text/csv" hidden />
     </div>
-    <p class="csv-tip">Tipp: Beim Teilen "In Dateien sichern" wählen, um dein Backup in iCloud Drive abzulegen.</p>
     <div id="history-list" class="history-list"></div>
     <p id="history-empty" class="history-empty" hidden>Noch keine Einträge vorhanden.</p>
 
@@ -148,6 +137,11 @@
 
   <!-- Bottom tab bar navigation -->
   <nav class="tab-bar">
+    <!-- Brand block: only visible in the desktop sidebar layout -->
+    <div class="tab-bar-brand" aria-hidden="true">
+      <img src="./icons/icon-192.png" alt="" />
+      <span>kalika-track</span>
+    </div>
     <button type="button" class="tab-btn is-active" data-view="dashboard">
       <svg class="tab-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
       <span>Dashboard</span>

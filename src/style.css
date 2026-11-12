@@ -633,56 +633,6 @@ body.has-tab-bar {
   min-height: auto;
 }
 
-.csv-tip {
-  margin: -0.25rem 0 1rem;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-}
-
-/* ---------- Backup reminder banner (Historie) ---------- */
-
-.backup-reminder {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 1rem;
-  padding: 0.85rem 1rem;
-  margin-bottom: 1rem;
-}
-
-/* Same equal-specificity guard as .running-indicator[hidden]: this class's own
-   `display: flex` would otherwise win over the browser's `[hidden]` rule. */
-.backup-reminder[hidden] {
-  display: none;
-}
-
-.backup-reminder-text {
-  margin: 0;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-}
-
-.backup-reminder-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-shrink: 0;
-}
-
-.btn-icon-ghost {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  padding: 0.4rem;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
 .history-empty {
   color: var(--text-muted);
   text-align: center;
@@ -1011,6 +961,10 @@ body.has-tab-bar {
   cursor: pointer;
 }
 
+.tab-bar-brand {
+  display: none;
+}
+
 .tab-icon {
   width: 22px;
   height: 22px;
@@ -1037,5 +991,317 @@ body.has-tab-bar {
   .tab-bar {
     max-width: 32rem;
     margin: 0 auto;
+  }
+}
+
+/* ==========================================================================
+   Desktop layout (>= 1024px)
+   Phones and tablets keep the mobile layout above untouched. On a PC the
+   bottom tab bar turns into a left sidebar, the header becomes a wide hero
+   card and the views use the extra width (two-column dashboard, day cards
+   in a grid inside each month).
+   ========================================================================== */
+
+@media (min-width: 1024px) {
+  body {
+    max-width: none;
+    margin: 0;
+  }
+
+  body.has-tab-bar {
+    padding-bottom: 0;
+  }
+
+  #app-shell:not([hidden]) {
+    display: grid;
+    grid-template-columns: 15rem minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  /* ---------- Sidebar navigation ---------- */
+
+  .tab-bar {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    height: 100dvh;
+    max-width: none;
+    margin: 0;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1.5rem 0.9rem;
+    border-top: none;
+    border-right: 1px solid var(--border);
+  }
+
+  .tab-bar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0 0.6rem 1.5rem;
+    font-weight: 700;
+    font-size: 1.05rem;
+    letter-spacing: -0.01em;
+  }
+
+  .tab-bar-brand img {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.55rem;
+  }
+
+  .tab-btn {
+    flex: none;
+    flex-direction: row;
+    gap: 0.75rem;
+    padding: 0.7rem 0.8rem;
+    border-radius: 0.75rem;
+    font-size: 0.95rem;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  .tab-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .tab-btn.is-active {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+  }
+
+  /* ---------- Header: wide hero card ---------- */
+
+  .app-header,
+  .view {
+    grid-column: 2;
+    width: min(100% - 4rem, 68rem);
+    justify-self: center;
+  }
+
+  .app-header {
+    grid-row: 1;
+    margin-top: 1.75rem;
+    padding: 2rem 2.5rem;
+    border-radius: 1.5rem;
+    text-align: left;
+    box-shadow: 0 14px 36px var(--shadow);
+  }
+
+  .header-content {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "status status"
+      "label  run"
+      "value  run";
+    column-gap: 2rem;
+  }
+
+  /* The brand already sits in the sidebar. */
+  .app-title {
+    display: none;
+  }
+
+  .sync-status {
+    grid-area: status;
+    justify-self: start;
+    margin: 0 0 0.75rem;
+  }
+
+  .balance-label { grid-area: label; }
+
+  .balance-value {
+    grid-area: value;
+    justify-self: start;
+    font-size: 3.75rem;
+  }
+
+  .running-indicator {
+    grid-area: run;
+    align-self: center;
+    margin: 0;
+    padding: 0.9rem 1.4rem;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.1);
+    text-align: right;
+  }
+
+  .running-meta {
+    justify-content: flex-end;
+  }
+
+  .running-elapsed {
+    font-size: 2.4rem;
+  }
+
+  /* ---------- Views ---------- */
+
+  .view {
+    grid-row: 2;
+    padding: 1.75rem 0 2.5rem;
+  }
+
+  /* Dashboard: timer control on the left, today's overview on the right. */
+  #view-dashboard.is-active {
+    display: grid;
+    grid-template-columns: minmax(15rem, 19rem) minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+  }
+
+  .actions {
+    margin: 0;
+  }
+
+  .btn-large {
+    min-height: 7.5rem;
+    font-size: 1.5rem;
+    border-radius: 1.25rem;
+  }
+
+  .today-card {
+    padding: 1.5rem;
+    border-radius: 1.25rem;
+  }
+
+  .section-title {
+    font-size: 1.15rem;
+    margin-bottom: 1rem;
+  }
+
+  .today-stats {
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .today-stat {
+    align-items: flex-start;
+    padding: 0.9rem 1.1rem;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+  }
+
+  .today-stat-label {
+    font-size: 0.8rem;
+  }
+
+  .today-stat-value {
+    font-size: 1.6rem;
+    letter-spacing: -0.01em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* History: title and all actions share one toolbar row. */
+  #view-history.is-active {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    column-gap: 0.75rem;
+    align-items: center;
+    align-content: start;
+  }
+
+  #view-history > :not(.history-title):not(.history-actions) {
+    grid-column: 1 / -1;
+  }
+
+  .history-title {
+    margin: 0;
+    font-size: 1.35rem;
+  }
+
+  .history-actions {
+    flex-wrap: nowrap;
+    margin: 0;
+  }
+
+  .history-actions .btn {
+    flex: none;
+    min-width: 0;
+  }
+
+  .history-list {
+    margin-top: 1.25rem;
+  }
+
+  .month-group {
+    border-radius: 1.1rem;
+  }
+
+  .month-group-header {
+    padding: 1rem 1.25rem;
+  }
+
+  .month-group-title {
+    font-size: 1.05rem;
+  }
+
+  /* Day groups become small cards laid out in a responsive grid. */
+  .month-group.is-expanded .month-group-body {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+    gap: 0.75rem;
+    padding: 0.25rem 1.25rem 1.25rem;
+  }
+
+  .month-group-body .day-group {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 0.9rem;
+  }
+
+  .toast {
+    left: calc(50% + 7.5rem);
+    bottom: 1.5rem;
+  }
+
+  .app-dialog {
+    width: min(90vw, 28rem);
+  }
+}
+
+/* Hover feedback only where a real pointer exists (mouse/trackpad). */
+@media (min-width: 1024px) and (hover: hover) {
+  .tab-btn:not(.is-active):hover {
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+    color: var(--text);
+  }
+
+  .btn-primary:not(:disabled):hover {
+    background: var(--accent-light);
+  }
+
+  .btn-primary.is-running:not(:disabled):hover {
+    background: var(--negative);
+    filter: brightness(1.08);
+  }
+
+  .btn-secondary:not(:disabled):hover {
+    border-color: var(--accent-light);
+  }
+
+  .btn-ghost:hover {
+    color: var(--text);
+  }
+
+  .month-group-header:hover {
+    background: color-mix(in srgb, var(--text) 4%, transparent);
+  }
+
+  .entry-edit-btn,
+  .day-group-meta,
+  .stat-edit-btn {
+    transition: color 150ms ease;
+  }
+
+  .entry-edit-btn:hover,
+  .day-group-meta:hover,
+  .stat-edit-btn:hover {
+    color: var(--accent-light);
   }
 }

@@ -4,7 +4,7 @@
      sessions:      { id, start: ISO, end: ISO|null, breakMinutes, note }
      days:          { [dateKey]: { targetMinutes } }
      compensations: { id, date: dateKey, minutes, note }
-     settings:      { defaultTargetMinutes, defaultBreakMinutes, lastExportAt, backupReminderSnoozedUntil }
+     settings:      { defaultTargetMinutes, defaultBreakMinutes }
    Every function throws on a database error. Writes are idempotent (ids are
    generated on the client), so the offline outbox can safely retry them.
    ========================================================================== */
@@ -22,8 +22,6 @@ const COMPENSATION_COLUMNS = 'id, day, minutes, note';
 export const DEFAULT_SETTINGS = {
   defaultTargetMinutes: 480,
   defaultBreakMinutes: 30,
-  lastExportAt: null,
-  backupReminderSnoozedUntil: null,
 };
 
 function unwrap({ data, error, status }) {
@@ -71,8 +69,6 @@ function toSettings(row) {
   return {
     defaultTargetMinutes: row.default_target_minutes,
     defaultBreakMinutes: row.default_break_minutes,
-    lastExportAt: row.last_export_at,
-    backupReminderSnoozedUntil: row.backup_reminder_snoozed_until,
   };
 }
 
@@ -82,7 +78,7 @@ export async function fetchState() {
     selectAll(SESSIONS, SESSION_COLUMNS, 'start_at'),
     selectAll(DAYS, 'day, target_minutes', 'day'),
     selectAll(COMPENSATIONS, COMPENSATION_COLUMNS, 'day'),
-    supabase.from(SETTINGS).select('*').maybeSingle().then(unwrap),
+    supabase.from(SETTINGS).select('default_target_minutes, default_break_minutes').maybeSingle().then(unwrap),
   ]);
 
   const days = {};
@@ -161,8 +157,6 @@ export async function saveSettings(userId, settings) {
       user_id: userId,
       default_target_minutes: settings.defaultTargetMinutes,
       default_break_minutes: settings.defaultBreakMinutes,
-      last_export_at: settings.lastExportAt,
-      backup_reminder_snoozed_until: settings.backupReminderSnoozedUntil,
     })
   );
 }

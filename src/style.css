@@ -315,6 +315,18 @@ body.has-tab-bar {
   color: var(--text);
 }
 
+.account-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.field-hint {
+  margin: -0.35rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 /* Header pill showing offline state / pending uploads. */
 .sync-status {
   display: inline-block;

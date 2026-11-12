@@ -131,7 +131,10 @@
 
     <div class="account-row">
       <span class="account-label">Angemeldet als <span id="account-email" class="account-email"></span></span>
-      <button id="logout-btn" type="button" class="btn btn-ghost btn-compact">Abmelden</button>
+      <div class="account-actions">
+        <button id="settings-btn" type="button" class="btn btn-secondary btn-compact">Einstellungen</button>
+        <button id="logout-btn" type="button" class="btn btn-ghost btn-compact">Abmelden</button>
+      </div>
     </div>
   </section>
 
@@ -264,6 +267,33 @@
           <input type="number" id="day-target-minutes" min="0" max="59" step="1" inputmode="numeric" />
         </label>
       </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
+        <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dialog: per-user defaults (kalika_track_settings) -->
+  <dialog id="settings-dialog" class="app-dialog">
+    <form id="settings-form" method="dialog">
+      <h3>Einstellungen</h3>
+      <span class="field-group-label">Standard-Zielarbeitszeit pro Tag</span>
+      <div class="field-row">
+        <label class="field">
+          <span>Stunden</span>
+          <input type="number" id="settings-target-hours" min="0" max="24" step="1" inputmode="numeric" required />
+        </label>
+        <label class="field">
+          <span>Minuten</span>
+          <input type="number" id="settings-target-minutes" min="0" max="59" step="1" inputmode="numeric" />
+        </label>
+      </div>
+      <label class="field">
+        <span>Standard-Pause (Minuten)</span>
+        <input type="number" id="settings-break-minutes" min="0" step="1" inputmode="numeric" required />
+      </label>
+      <p class="field-hint">Gilt für neue Tage. Bereits erfasste Tage behalten ihre bisherige Zielzeit.</p>
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" data-cancel>Abbrechen</button>
         <button type="submit" class="btn btn-primary" value="confirm">Speichern</button>

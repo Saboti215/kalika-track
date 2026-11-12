@@ -1084,6 +1084,12 @@ body.has-tab-bar {
   font-size: 1.1rem;
 }
 
+/* Dialog titles take the initial focus (autofocus) so opening a dialog on a
+   phone doesn't jump into the first input and pop up the keyboard or picker. */
+.app-dialog h3:focus {
+  outline: none;
+}
+
 .confirm-message {
   margin: 0;
   color: var(--text-muted);

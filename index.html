@@ -182,7 +182,7 @@
   <!-- Dialog: shown when stopping a running session -->
   <dialog id="stop-dialog" class="app-dialog">
     <form id="stop-form" method="dialog">
-      <h3>Sitzung beenden</h3>
+      <h3 tabindex="-1" autofocus>Sitzung beenden</h3>
       <label class="field">
         <span>Pause (Minuten)</span>
         <input type="number" id="stop-break-minutes" min="0" step="1" inputmode="numeric" required />
@@ -212,7 +212,7 @@
   <!-- Dialog: add a compensation (time off) entry -->
   <dialog id="compensation-dialog" class="app-dialog">
     <form id="compensation-form" method="dialog">
-      <h3>Überstunden ausgleichen</h3>
+      <h3 tabindex="-1" autofocus>Überstunden ausgleichen</h3>
       <label class="field">
         <span>Datum</span>
         <input type="date" id="compensation-date" required />
@@ -242,7 +242,7 @@
   <!-- Dialog: edit an existing compensation entry -->
   <dialog id="compensation-edit-dialog" class="app-dialog">
     <form id="compensation-edit-form" method="dialog">
-      <h3>Ausgleich bearbeiten</h3>
+      <h3 tabindex="-1" autofocus>Ausgleich bearbeiten</h3>
       <label class="field">
         <span>Datum</span>
         <input type="date" id="compensation-edit-date" required />
@@ -275,7 +275,7 @@
   <!-- Dialog: edit a day's target time (break now lives per-session) -->
   <dialog id="day-settings-dialog" class="app-dialog">
     <form id="day-settings-form" method="dialog">
-      <h3>Zielzeit <span id="day-settings-date"></span></h3>
+      <h3 tabindex="-1" autofocus>Zielzeit <span id="day-settings-date"></span></h3>
       <span class="field-group-label">Zielarbeitszeit</span>
       <div class="field-row">
         <label class="field">
@@ -297,7 +297,7 @@
   <!-- Dialog: per-user defaults (kalika_track_settings) -->
   <dialog id="settings-dialog" class="app-dialog">
     <form id="settings-form" method="dialog">
-      <h3>Einstellungen</h3>
+      <h3 tabindex="-1" autofocus>Einstellungen</h3>
       <span class="field-group-label">Standard-Zielarbeitszeit pro Tag</span>
       <div class="field-row">
         <label class="field">
@@ -324,7 +324,7 @@
   <!-- Dialog: edit an existing session's start/end time and break -->
   <dialog id="session-edit-dialog" class="app-dialog">
     <form id="session-edit-form" method="dialog">
-      <h3>Sitzung bearbeiten</h3>
+      <h3 tabindex="-1" autofocus>Sitzung bearbeiten</h3>
       <label class="field">
         <span>Start</span>
         <input type="time" id="session-edit-start" required />
@@ -354,7 +354,7 @@
   <!-- Dialog: add a retroactive/manual session entry -->
   <dialog id="manual-entry-dialog" class="app-dialog">
     <form id="manual-entry-form" method="dialog">
-      <h3>Eintrag hinzufügen</h3>
+      <h3 tabindex="-1" autofocus>Eintrag hinzufügen</h3>
       <label class="field">
         <span>Datum</span>
         <input type="date" id="manual-entry-date" required />
